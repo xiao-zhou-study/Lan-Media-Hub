@@ -289,7 +289,7 @@ const filteredFiles = computed(() => {
 
       <div class="absolute inset-0 flex items-center justify-center">
         <video v-if="previewType === 'video' || previewType === 'audio'"
-          ref="videoRef"
+          ref="videoRef" :src="previewUrl"
           class="w-full h-full object-contain" playsinline controls />
         <img v-else-if="previewType === 'image'" :src="previewUrl" class="w-full h-full object-contain" />
       </div>
