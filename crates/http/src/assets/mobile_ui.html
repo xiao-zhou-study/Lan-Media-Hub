@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>Lan Media Hub</title>
+<style>
+:root{--bg:#f5f6f8;--card:#fff;--blue:#4a90d9;--text:#333;--sub:#888;--border:#e8eaed;--hover:#f0f4ff;--radius:6px}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+.header{background:var(--card);border-bottom:1px solid var(--border);padding:10px 14px;position:sticky;top:0;z-index:20;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.header h1{font-size:16px;font-weight:600;display:flex;align-items:center;gap:6px}
+.header h1 span{font-size:11px;font-weight:400;color:var(--sub);background:#f0f0f0;padding:1px 7px;border-radius:8px}
+.row-hint{font-size:11px;color:var(--sub);margin-top:4px}
+.upload-area{display:flex;gap:6px;margin:8px 0}
+.btn{padding:6px 12px;border-radius:var(--radius);font-size:12px;cursor:pointer;border:none;font-weight:500;transition:all .15s}
+.btn-blue{background:var(--blue);color:#fff}.btn-blue:hover{background:#3a7bc8}
+.btn-gray{background:#e8eaed;color:#444}.btn-gray:hover{background:#d8dae0}
+.btn-sm{padding:3px 8px;font-size:11px}
+.search-bar{margin:8px 0;position:relative}
+.search-bar input{width:100%;padding:7px 10px 7px 30px;border:1px solid var(--border);border-radius:var(--radius);font-size:12px;outline:none;background:var(--card)}
+.search-bar::before{content:'🔍';position:absolute;left:9px;top:50%;transform:translateY(-50%);font-size:12px}
+.toolbar{display:flex;align-items:center;gap:3px;padding:6px 0;flex-wrap:wrap}
+.toolbar .spacer{flex:1}
+.btn-icon{width:28px;height:28px;padding:0;display:inline-flex;align-items:center;justify-content:center;border-radius:var(--radius);border:1px solid var(--border);background:var(--card);cursor:pointer;font-size:13px;color:#555}
+.btn-icon:hover{background:var(--hover)}
+.breadcrumb{display:flex;align-items:center;gap:3px;font-size:11px;color:var(--blue);overflow-x:auto;white-space:nowrap;padding:3px 0}
+.breadcrumb a{color:var(--blue);text-decoration:none;flex-shrink:0}.breadcrumb a:hover{text-decoration:underline}
+.breadcrumb span{color:var(--sub);margin:0 1px;flex-shrink:0}
+.main{padding:6px 14px}
+.table-header{display:flex;align-items:center;padding:7px 10px;background:var(--card);border-radius:var(--radius) var(--radius) 0 0;border:1px solid var(--border);font-size:10px;color:var(--sub);font-weight:600;text-transform:uppercase}
+.col-name{flex:3;cursor:pointer}.col-time{flex:2;display:none}.col-size{flex:1;text-align:right}.col-ext{flex:1;text-align:center;display:none}.col-act{width:80px;text-align:center}
+@media(min-width:600px){.col-time{display:block}.col-ext{display:block}}
+.row{display:flex;align-items:center;padding:8px 10px;background:var(--card);border:1px solid var(--border);border-top:none;font-size:12px;cursor:default;transition:background .1s;user-select:none}
+.row:last-child{border-radius:0 0 var(--radius) var(--radius)}
+.row:hover{background:var(--hover)}
+.row.clickable{cursor:pointer}
+.row .col-name{flex:3;display:flex;align-items:center;gap:6px;min-width:0}
+.row .col-name .icon{font-size:17px;flex-shrink:0;width:22px;text-align:center}
+.row .col-name .name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .col-time{flex:2;color:var(--sub);font-size:11px;display:none}
+.row .col-size{flex:1;text-align:right;color:var(--sub);font-size:11px}
+.row .col-ext{flex:1;text-align:center;color:var(--sub);font-size:10px;display:none}
+.row .col-act{width:80px;display:flex;justify-content:center;gap:3px}
+@media(min-width:600px){.row .col-time{display:block}.row .col-ext{display:block}}
+.empty{text-align:center;padding:40px 14px;color:var(--sub);font-size:12px}
+.empty-icon{font-size:36px;margin-bottom:6px}
+.loading{text-align:center;padding:40px;color:var(--sub)}.spinner{width:24px;height:24px;border:2px solid #e0e0e0;border-top-color:var(--blue);border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 10px}@keyframes spin{to{transform:rotate(360deg)}}
+.vp-overlay{position:fixed;inset:0;background:#000;z-index:100;display:none;flex-direction:column}
+.vp-overlay.show{display:flex}
+.vp-header{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;color:#fff;font-size:13px;background:rgba(0,0,0,.5)}
+.vp-close{background:none;border:none;color:#fff;font-size:22px;cursor:pointer;padding:4px 8px}
+.vp-video{flex:1;display:flex;align-items:center;justify-content:center}
+.vp-video video{max-width:100%;max-height:100%}
+.img-overlay{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:100;display:none;align-items:center;justify-content:center;flex-direction:column}
+.img-overlay.show{display:flex}
+.img-overlay img{max-width:95%;max-height:80%;object-fit:contain}
+.img-tools{margin-top:12px;display:flex;gap:8px}
+.img-tools button{padding:8px 18px;border-radius:20px;border:none;font-size:13px;cursor:pointer}
+.img-close{position:absolute;top:10px;right:14px;background:none;border:none;color:#fff;font-size:26px;cursor:pointer}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:90;display:none;align-items:center;justify-content:center}
+.modal-overlay.show{display:flex}
+.modal-box{background:var(--card);border-radius:10px;padding:18px;width:90%;max-width:340px;box-shadow:0 8px 30px rgba(0,0,0,.12)}
+.modal-box h3{font-size:15px;margin-bottom:10px}
+.modal-box .info-row{display:flex;justify-content:space-between;padding:5px 0;font-size:12px;border-bottom:1px solid var(--border)}
+.modal-box .info-row .label{color:var(--sub)}
+.modal-box .btn-row{display:flex;gap:6px;margin-top:12px;justify-content:flex-end}
+.toast{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);background:#333;color:#fff;padding:7px 16px;border-radius:16px;font-size:12px;z-index:200;opacity:0;transition:opacity .3s;pointer-events:none}
+.toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div class="header">
+  <div style="display:flex;justify-content:space-between;align-items:center">
+    <h1>Lan Media Hub <span id="shareLabel">共享列表</span></h1>
+    <span style="font-size:11px;color:#4caf50">● 在线</span>
+  </div>
+  <p class="row-hint">单击文件夹进入 · 单击文件打开</p>
+  <div class="upload-area">
+    <button class="btn btn-blue" onclick="document.getElementById('fi').click()">📤 上传文件</button>
+    <button class="btn btn-gray" onclick="document.getElementById('di').click()">📁 上传文件夹</button>
+    <input type="file" id="fi" multiple hidden onchange="uploadFiles(this.files)">
+    <input type="file" id="di" webkitdirectory multiple hidden onchange="uploadFiles(this.files)">
+  </div>
+  <div class="search-bar"><input type="text" id="si" placeholder="搜索文件名..." oninput="doSearch()"></div>
+  <div class="breadcrumb" id="breadcrumb"></div>
+  <div style="font-size:10px;color:var(--sub);padding:2px 0" id="itemCount"></div>
+</div>
+<div class="main">
+  <div class="table-header">
+    <span class="col-name" onclick="toggleSort()">文件名 <span id="sortArrow">↑</span></span>
+    <span class="col-time">修改时间</span><span class="col-size">大小</span>
+    <span class="col-ext">后缀</span><span class="col-act">操作</span>
+  </div>
+  <div id="list"><div class="loading"><div class="spinner"></div>加载中...</div></div>
+</div>
+<div class="vp-overlay" id="vp">
+  <div class="vp-header"><span id="vpt">播放</span><button class="vp-close" onclick="cv()">✕</button></div>
+  <div class="vp-video"><video id="vv" controls playsinline></video></div>
+</div>
+<div class="img-overlay" id="io">
+  <button class="img-close" onclick="ci()">✕</button>
+  <img id="ip" src="">
+  <div class="img-tools"><button class="btn btn-blue" onclick="if(document.getElementById('ip').src)window.open(document.getElementById('ip').src)">下载</button><button class="btn btn-gray" onclick="ci()">关闭</button></div>
+</div>
+<div class="modal-overlay" id="mo">
+  <div class="modal-box"><h3 id="mt"></h3><div id="mb"></div>
+    <div class="btn-row"><button class="btn btn-gray" onclick="document.getElementById('mo').classList.remove('show')">关闭</button></div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+function $(id){return document.getElementById(id)}
+function api(u,o){o=o||{};var sep=u.indexOf('?')>=0?'&':'?';return fetch(u+sep+'pw='+encodeURIComponent(pw),o).then(function(r){if(!r.ok)throw new Error(r.status);return r.json()})}
+function toast(m){var t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(function(){t.classList.remove('show')},2000)}
+function fs(b){if(!b)return'-';if(b<1024)return b+' B';if(b<1048576)return(b/1024).toFixed(1)+' KB';if(b<1073741824)return(b/1048576).toFixed(1)+' MB';return(b/1073741824).toFixed(1)+' GB'}
+function ic(t){var m={video:'🎬',audio:'🎵',image:'🖼️',file:'📄',directory:'📁'};return m[t]||'📄'}
+function es(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
+
+var shares=[],entries=[],allEntries=[],cs=null,cp='',hist=[],hi=-1,sa=true,ciu='';
+
+function ph(id,p){if(hi<hist.length-1)hist=hist.slice(0,hi+1);hist.push({s:id,p:p||''});hi=hist.length-1;un()}
+function un(){var b=$('btnBack'),f=$('btnFwd');if(b)b.style.opacity=hi>=0?'1':'0.3';if(f)f.style.opacity=hi<hist.length-1?'1':'0.3'}
+function gb(){if(hi>=0)hi--;if(hi<0){ls();return}var h=hist[hi];nt(h.s,h.p,false)}
+function gf(){if(hi<hist.length-1){hi++;var h=hist[hi];nt(h.s,h.p,false)}}
+function gu(){if(!cp){ls();return}var p=cp.split('/').filter(Boolean);p.pop();nt(cs,p.join('/'),true)}
+function gr(){nt(cs,'',true)}
+function rf(){nt(cs,cp,false)}
+
+function nt(id,p,ah){
+  if(!id){ls();return}
+  cs=id;cp=p||'';
+  if(ah!==false)ph(id,p||'');
+  rb();$('list').innerHTML='<div class="loading"><div class="spinner"></div>加载中...</div>';$('si').value='';
+  api('/api/browse/'+id+(p?'/'+p:'')).then(function(d){
+    $('shareLabel').textContent=p||'浏览';
+    if(d.entries){entries=d.entries;allEntries=d.entries;rl(entries);$('itemCount').textContent=entries.length+' 项'}
+    else if(d.name){entries=[];allEntries=[];$('list').innerHTML='<div class="empty"><div class="empty-icon">📄</div><p>'+d.name+'</p></div>'}
+    else{$('list').innerHTML='<div class="empty"><div class="empty-icon">⚠️</div>无法浏览</div>'}
+  }).catch(function(){$('list').innerHTML='<div class="empty"><div class="empty-icon">⚠️</div>加载失败</div>'})
+}
+
+function rb(){
+  var b=$('breadcrumb'),h='';h+='<a href="javascript:ls()">🏠</a>';
+  if(cs){var n='';for(var i=0;i<shares.length;i++){if(shares[i].id===cs){n=shares[i].name;break}}h+=' <span>/</span> <a href="javascript:nt(\''+cs+'\',\'\',true)">'+n+'</a>';
+  if(cp){var p=cp.split('/').filter(Boolean),a='';for(var j=0;j<p.length;j++){a+='/'+p[j];h+=' <span>/</span> ';if(j===p.length-1)h+='<span>'+p[j]+'</span>';else h+='<a href="javascript:nt(\''+cs+'\',\''+a+'\',true)">'+p[j]+'</a>'}}}
+  b.innerHTML=h}
+
+function rl(items){
+  var l=$('list');
+  if(!items.length){l.innerHTML='<div class="empty"><div class="empty-icon">📭</div><p>此目录为空</p></div>';return}
+  var dirs=items.filter(function(e){return e.is_dir}),files=items.filter(function(e){return !e.is_dir});
+  items=dirs.concat(files);
+  l.innerHTML=items.map(function(e){
+    var ext=(e.name.split('.').pop()||'').toLowerCase();if(e.is_dir)ext='';
+    var s=es(e.path),n=es(e.name),z=e.size,t=e.media_type||'file',d=e.is_dir;
+    if(d)return '<div class="row clickable" onclick="nt(\''+cs+'\',\''+s+'\',true)"><div class="col-name"><span class="icon">📁</span><span class="name">'+e.name+'</span></div><div class="col-time">-</div><div class="col-size">-</div><div class="col-ext"></div><div class="col-act"><span style="font-size:10px;color:var(--sub)">文件夹</span></div></div>';
+    return '<div class="row"><div class="col-name"><span class="icon">'+ic(t)+'</span><span class="name">'+e.name+'</span></div><div class="col-time">-</div><div class="col-size">'+fs(z)+'</div><div class="col-ext">'+ext+'</div><div class="col-act"><button class="btn btn-sm btn-blue" onclick="event.stopPropagation();of(\''+cs+'\',\''+s+'\',\''+n+'\','+z+',\''+t+'\')">打开</button><button class="btn-icon" onclick="event.stopPropagation();si(\''+cs+'\',\''+s+'\',\''+n+'\','+z+',\''+t+'\')">ℹ</button></div></div>';
+  }).join('');
+}
+
+function ts(){sa=!sa;$('sortArrow').textContent=sa?'↑':'↓';entries.sort(function(a,b){var c=a.name.localeCompare(b.name);return sa?c:-c});rl(entries);entries=allEntries}
+function ds(){var q=$('si').value.toLowerCase();entries=q?allEntries.filter(function(e){return e.name.toLowerCase().indexOf(q)>=0}):allEntries;rl(entries);$('itemCount').textContent=entries.length+' 项'}
+
+function of(id,p,n,z,t){
+  var segs=p.split('/').map(function(s){return encodeURIComponent(s)}).join('/');
+  var ext=(n.split('.').pop()||'').toLowerCase();
+  // 浏览器不支持直接播放的格式用转码
+  var native=['mp4','webm','ogg','mp3','wav','aac','m4a'];
+  var useTc=native.indexOf(ext)===-1;
+  var u='/api/'+(useTc?'transcode':'stream')+'/'+encodeURIComponent(id)+'/'+segs;
+  if(t==='video'||t==='audio'){pv(u,n);return}
+  if(t==='image'){si2(u);return}
+  window.open(u);
+}
+function si(id,p,n,z,t){
+  $('mt').textContent=n;$('mb').innerHTML='<div class="info-row"><span class="label">类型</span><span>'+t+'</span></div><div class="info-row"><span class="label">大小</span><span>'+fs(z)+'</span></div><div class="info-row"><span class="label">路径</span><span style="font-size:10px;word-break:break-all">'+p+'</span></div>';
+  $('mo').classList.add('show');
+}
+function pv(u,n){$('vpt').textContent=n;var v=$('vv');v.src=u;$('vp').classList.add('show');v.play().catch(function(){})}
+function cv(){var v=$('vv');v.pause();v.src='';$('vp').classList.remove('show')}
+function si2(u){ciu=u;$('ip').src=u;$('io').classList.add('show')}
+function ci(){$('io').classList.remove('show');setTimeout(function(){$('ip').src=''},200)}
+
+function uploadFiles(fs){if(!fs||!fs.length||!cs)return;var t=fs.length,d=0;function n(i){if(i>=t){toast('上传完成 '+d+'/'+t);setTimeout(rf,1500);return}var f=fs[i],fd=new FormData();fd.append('file',f);var p=(cp?cp+'/':'')+f.name;fetch('/api/upload/'+cs+'?path='+encodeURIComponent(p),{method:'POST',body:fd}).then(function(r){if(r.ok)d++}).catch(function(){}).finally(function(){n(i+1)})}toast('上传中...');n(0)}
+
+document.addEventListener('dragover',function(e){e.preventDefault()});
+document.addEventListener('drop',function(e){e.preventDefault();if(e.dataTransfer.files.length)uploadFiles(e.dataTransfer.files)});
+
+function ls(){
+  cs=null;cp='';hist=[];hi=-1;entries=[];allEntries=[];
+  rb();un();$('shareLabel').textContent='共享列表';$('si').value='';
+  $('list').innerHTML='<div class="loading"><div class="spinner"></div>加载中...</div>';
+  api('/api/shares').then(function(s){shares=s;
+    if(!s.length){$('list').innerHTML='<div class="empty"><div class="empty-icon">📂</div><p>暂无共享文件夹</p><p style="font-size:11px;color:#aaa">请在桌面应用中添加共享</p></div>';return}
+    $('list').innerHTML=s.map(function(x){return '<div class="row clickable" onclick="nt(\''+x.id+'\',\'\',true)"><div class="col-name"><span class="icon">📁</span><span class="name">'+x.name+'</span></div><div class="col-time">-</div><div class="col-size">'+fs(x.total_size)+'</div><div class="col-ext">共享</div><div class="col-act"><span style="font-size:10px;color:var(--sub)">'+x.file_count+' 文件</span></div></div>'}).join('');
+    $('itemCount').textContent=s.length+' 个共享';
+  }).catch(function(){$('list').innerHTML='<div class="empty"><div class="empty-icon">⚠️</div><p>连接失败</p></div>'})
+}
+// 密码检查
+var pw=localStorage.getItem('lmpw')||'';
+function initApp(){
+  // 先检查是否需要密码
+  fetch('/api/auth?pw='+encodeURIComponent(pw)).then(function(r){
+    if(r.ok){ls();return}
+    // 需要密码
+    showPwPrompt();
+  }).catch(function(){ls()}); // 网络错误直接尝试加载
+}
+function showPwPrompt(){
+  var l=$('list');
+  l.innerHTML='<div style="max-width:300px;margin:80px auto;padding:24px;background:var(--card);border-radius:12px;text-align:center;box-shadow:0 2px 12px rgba(0,0,0,.08)">'+
+    '<div style="font-size:36px;margin-bottom:8px">🔒</div>'+
+    '<h2 style="font-size:16px;margin-bottom:4px">需要密码</h2>'+
+    '<p style="font-size:12px;color:var(--sub);margin-bottom:16px">访问此共享需要输入密码</p>'+
+    '<input type="password" id="pwInput" placeholder="请输入密码" style="width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:var(--radius);font-size:14px;text-align:center;margin-bottom:12px;outline:none" onkeydown="if(event.key===\'Enter\')checkPw()">'+
+    '<button onclick="checkPw()" style="width:100%;padding:8px;background:var(--blue);color:#fff;border:none;border-radius:var(--radius);font-size:14px;cursor:pointer">确认</button>'+
+    '<p id="pwError" style="font-size:11px;color:#e74c3c;margin-top:8px;display:none">密码错误</p>'+
+  '</div>';
+  setTimeout(function(){var el=$('pwInput');if(el)el.focus()},300);
+}
+function checkPw(){
+  var inp=$('pwInput');if(!inp)return;
+  pw=inp.value;
+  fetch('/api/auth?pw='+encodeURIComponent(pw)).then(function(r){
+    if(r.ok){localStorage.setItem('lmpw',pw);ls()}
+    else{var e=$('pwError');if(e)e.style.display='block';inp.value=''}
+  }).catch(function(){ls()});
+}
+un();initApp();
+</script>
+</body>
+</html>

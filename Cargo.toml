@@ -1,0 +1,62 @@
+[workspace]
+members = [
+    "crates/core",
+    "crates/http",
+    "crates/config",
+    "src-tauri",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+authors = ["LanMediaHub Team"]
+license = "MIT"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1.37", features = ["full"] }
+
+# HTTP server
+axum = { version = "0.7", features = ["macros", "multipart"] }
+axum-extra = { version = "0.9", features = ["query"] }
+tower = { version = "0.4", features = ["util"] }
+tower-http = { version = "0.5", features = ["fs", "cors", "trace"] }
+tokio-util = { version = "0.7", features = ["io"] }
+hyper = { version = "1.3", features = ["full"] }
+
+# Database
+sqlx = { version = "0.7", features = ["runtime-tokio", "sqlite"] }
+
+# File watching
+notify = "6.1"
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Utilities
+uuid = { version = "1.8", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+path-clean = "0.1"
+get_if_addrs = "0.5"
+qrcode = "0.14"
+base64 = "0.22"
+md5 = "0.7"
+jsonwebtoken = "9"
+sha2 = "0.10"
+ffmpeg-sidecar = "2"
+
+# Internal crates
+lan-media-hub-core = { path = "crates/core" }
+lan-media-hub-http = { path = "crates/http" }
+lan-media-hub-config = { path = "crates/config" }

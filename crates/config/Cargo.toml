@@ -1,0 +1,15 @@
+[package]
+name = "lan-media-hub-config"
+description = "Configuration management for Lan Media Hub"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+get_if_addrs.workspace = true
+tokio = { workspace = true, features = ["fs", "io-util"] }

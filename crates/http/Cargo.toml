@@ -1,0 +1,28 @@
+[package]
+name = "lan-media-hub-http"
+description = "HTTP server for Lan Media Hub"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+tokio.workspace = true
+axum.workspace = true
+axum-extra.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+tokio-util.workspace = true
+md5.workspace = true
+chrono.workspace = true
+ffmpeg-sidecar.workspace = true
+hyper.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+lan-media-hub-core.workspace = true
+path-clean.workspace = true
+uuid.workspace = true
+jsonwebtoken.workspace = true
+sha2.workspace = true

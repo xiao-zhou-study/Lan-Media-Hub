@@ -1,0 +1,29 @@
+[package]
+name = "lan-media-hub"
+description = "Lan Media Hub Desktop Application"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-opener = "2"
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+lan-media-hub-core.workspace = true
+lan-media-hub-http.workspace = true
+lan-media-hub-config.workspace = true
+uuid.workspace = true
+path-clean.workspace = true
+qrcode.workspace = true
+hostname = "0.4"
