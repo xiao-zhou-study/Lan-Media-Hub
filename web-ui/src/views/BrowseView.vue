@@ -131,18 +131,6 @@ async function handleClick(f: any) {
         seekTime: 10,
         autoplay: !needTranscode,
       })
-      // 转码视频 seek
-      if (needTranscode) {
-        let seeking = false
-        plyr.on('seeked', () => {
-          if (seeking) return; const v = videoRef.value!
-          if (Math.abs(v.currentTime - previewCurrentTime.value) > 1) {
-            seeking = true; previewCurrentTime.value = v.currentTime
-            previewUrl.value = withToken(`/api/transcode/${props.shareId}/${currentFilePath.value}?start=${v.currentTime}`)
-            nextTick(() => { v.play().catch(()=>{}); setTimeout(()=>seeking=false, 500) })
-          }
-        })
-      }
     }
   }
 }
@@ -379,7 +367,7 @@ const filteredFiles = computed(() => {
 
       <div class="absolute inset-0 flex items-center justify-center">
         <video v-if="previewType === 'video' || previewType === 'audio'"
-          ref="videoRef" :src="previewUrl" :key="previewUrl"
+          ref="videoRef" :src="isTranscoding ? undefined : previewUrl" :key="previewUrl"
           class="w-full h-full object-contain" playsinline />
         <!-- Speed hint -->
         <img v-else-if="previewType === 'image'" :src="previewUrl" class="w-full h-full object-contain" />
