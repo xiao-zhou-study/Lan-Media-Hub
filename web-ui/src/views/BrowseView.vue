@@ -33,6 +33,7 @@ const previewCurrentTime = ref(0)
 const showPreview = ref(false)
 const seekInput = ref('')
 const isTranscoding = ref(false)
+const currentFilePath = ref("")
 const speedHint = ref('')
 const speedSide = ref<'left' | 'right'>('right')
 let plyr: Plyr | null = null
@@ -93,6 +94,7 @@ async function handleClick(f: any) {
   previewName.value = f.name
   previewDuration.value = 0
   previewCurrentTime.value = 0
+  currentFilePath.value = f.path
   isTranscoding.value = needTranscode
 
 
