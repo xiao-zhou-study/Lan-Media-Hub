@@ -50,8 +50,7 @@ pub async fn get_thumbnail(
         let is_bc = ext == "bc!";
         let result = tokio::process::Command::new(ffmpeg_path())
             .arg("-y")
-            .arg("-err_detect").arg("ignore_err")
-            .arg("-ss").arg(if is_bc { "0" } else { "3" })  // .bc! 不完整文件从头读
+            .arg("-ss").arg(if is_bc { "0" } else { "3" })
             .arg("-i").arg(clean.to_string_lossy().to_string())
             .arg("-vframes").arg("1")
             .arg("-vf").arg(format!("scale={}:-1", params.size))
@@ -69,14 +68,28 @@ pub async fn get_thumbnail(
             }
             Ok(o) => {
                 let stderr = String::from_utf8_lossy(&o.stderr);
-                tracing::warn!("Thumbnail ffmpeg failed for {:?}: {}", clean, stderr.lines().last().unwrap_or("unknown error"));
+                tracing::warn!("Thumbnail ffmpeg failed for {:?}: {}", clean, stderr.trim());
                 let _ = tokio::fs::remove_file(&output).await;
-                return (StatusCode::INTERNAL_SERVER_ERROR, "Thumbnail failed").into_response();
+                // .bc! 重试：去掉 scale 滤镜，原尺寸输出
+                if is_bc {
+                    let output2 = cache_dir.join(format!("{}.tmp2.jpg", cache_key));
+                    let r2 = tokio::process::Command::new(ffmpeg_path())
+                        .arg("-y").arg("-ss").arg("0").arg("-i").arg(clean.to_string_lossy().to_string())
+                        .arg("-vframes").arg("1").arg("-q:v").arg("2")
+                        .arg("-f").arg("image2").arg(output2.to_string_lossy().to_string())
+                        .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
+                        .status().await;
+                    match r2 {
+                        Ok(s) if s.success() => { let _ = tokio::fs::rename(&output2, &cache_path).await; return serve_file(&cache_path, "image/jpeg").await; }
+                        _ => { let _ = tokio::fs::remove_file(&output2).await; }
+                    }
+                }
+                return (StatusCode::NOT_FOUND, "No thumbnail available").into_response();
             }
             Err(e) => {
                 tracing::warn!("Thumbnail ffmpeg spawn failed for {:?}: {}", clean, e);
                 let _ = tokio::fs::remove_file(&output).await;
-                return (StatusCode::INTERNAL_SERVER_ERROR, "Thumbnail failed").into_response();
+                return (StatusCode::NOT_FOUND, "No thumbnail available").into_response();
             }
         }
     }
