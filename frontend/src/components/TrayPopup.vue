@@ -57,7 +57,7 @@ import QRCode from "qrcode";
   <!-- 顶部栏 -->
   <header class="px-5 py-2.5 bg-white border-b border-slate-200 flex items-center justify-between shrink-0">
     <div class="flex items-center gap-3">
-      <div class="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-500 to-indigo-600 flex items-center justify-center text-white text-xs font-bold shadow">L</div>
+      <img src="/icon.jpg" class="w-7 h-7 rounded-lg object-cover shadow" />
       <span class="text-sm font-bold">Lan Media Hub</span>
       <span class="text-xs text-slate-400">个人云</span>
     </div>
