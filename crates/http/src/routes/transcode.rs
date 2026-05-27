@@ -27,6 +27,19 @@ fn transcode_cache_dir() -> PathBuf {
     let _ = std::fs::create_dir_all(&dir); dir
 }
 
+/// 检测 Intel QSV 硬件加速是否可用（一次检测，缓存结果）
+fn qsv_available() -> bool {
+    use std::sync::OnceLock;
+    static QSV: OnceLock<bool> = OnceLock::new();
+    *QSV.get_or_init(|| {
+        std::process::Command::new(ffmpeg_path())
+            .args(["-hide_banner", "-encoders"])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).contains("h264_qsv"))
+            .unwrap_or(false)
+    })
+}
+
 /// ffprobe 检测源视频编码
 async fn probe_video_codec(path: &PathBuf) -> String {
     match tokio::process::Command::new(ffprobe_path())
@@ -62,12 +75,14 @@ pub async fn transcode_video(
 
     let codec = probe_video_codec(&clean).await;
     let can_remux = codec == "h264";
+    let use_qsv = !can_remux && qsv_available();
 
-    // 缓存 key：文件路径 + remux/transcode
-    let cache_key = format!("{:x}_{}", md5::compute(clean.to_string_lossy().as_bytes()), if can_remux { "remux" } else { "transcode" });
+    // 缓存 key：文件 hash + 编码策略
+    let profile = if can_remux { "remux" } else if use_qsv { "qsv" } else { "sw" };
+    let cache_key = format!("{:x}_{}", md5::compute(clean.to_string_lossy().as_bytes()), profile);
     let cache_path = transcode_cache_dir().join(&cache_key);
 
-    // 缓存命中 → 直接走文件流（支持 Range）
+    // 缓存命中 → 直接走文件流
     if cache_path.exists() {
         return super::share::serve_cached_file(&cache_path).await;
     }
@@ -75,6 +90,13 @@ pub async fn transcode_video(
     let start = params.get("start").and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
 
     let mut cmd = tokio::process::Command::new(ffmpeg_path());
+
+    // QSV 硬件加速：解码也走 GPU，零拷贝到编码器
+    if use_qsv {
+        cmd.arg("-hwaccel").arg("qsv")
+           .arg("-hwaccel_output_format").arg("qsv");
+    }
+
     if start > 0.0 {
         cmd.arg("-ss").arg(format!("{:.3}", start));
     }
@@ -82,6 +104,10 @@ pub async fn transcode_video(
 
     if can_remux {
         cmd.arg("-c:v").arg("copy");
+    } else if use_qsv {
+        cmd.arg("-c:v").arg("h264_qsv")
+           .arg("-preset").arg("veryfast")
+           .arg("-global_quality").arg("23");
     } else {
         cmd.arg("-c:v").arg("libx264")
            .arg("-preset").arg("ultrafast")
