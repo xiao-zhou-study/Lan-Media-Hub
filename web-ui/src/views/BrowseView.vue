@@ -1,15 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, computed, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import Plyr from 'plyr'
-import 'plyr/dist/plyr.css'
-
-// 竖版视频适配
-const plyrOverrideStyle = `
-.plyr { max-width: 100% !important; max-height: 100% !important; }
-.plyr__video-wrapper { max-height: 100% !important; }
-.plyr video { max-width: 100% !important; max-height: 100% !important; object-fit: contain !important; }
-`
+import { createPlayer } from 'avbridge'
 
 const props = defineProps<{ shareId: string; path?: string[] }>()
 const router = useRouter()
@@ -27,14 +19,10 @@ const sortOrder = ref<'asc' | 'desc'>((localStorage.getItem('lm_order') as any) 
 const previewUrl = ref('')
 const previewType = ref('')
 const previewName = ref('')
-const previewDuration = ref(0)
-const previewCurrentTime = ref(0)
 const showPreview = ref(false)
-const isTranscoding = ref(false)
-const currentFilePath = ref("")
 const speedHint = ref('')
 const speedSide = ref<'left' | 'right'>('right')
-let plyr: Plyr | null = null
+let player: any = null
 const videoRef = ref<HTMLVideoElement>()
 
 const displayPath = computed(() => {
@@ -59,8 +47,6 @@ async function loadFiles() {
 }
 
 onMounted(async () => {
-  // 注入 Plyr 竖版视频适配样式
-  const style = document.createElement('style'); style.textContent = plyrOverrideStyle; document.head.appendChild(style)
   try { const s = await api('/api/shares'); const f = s.find((x: any) => x.id === props.shareId); if (f) shareName.value = f.name } catch {}
   await loadFiles()
 })
@@ -84,67 +70,37 @@ function goBack() {
 
 async function handleClick(f: any) {
   if (f.is_dir) { navTo(f.path); return }
-  const ext = (f.name.split('.').pop() || '').toLowerCase()
-  const nativeExts = ['mp4', 'm4v', 'webm', 'mkv', 'mov', 'ogv', 'ogg', 'mp3', 'wav', 'aac', 'm4a', 'flac']
-  const needTranscode = f.media_type === 'video' && !nativeExts.includes(ext)
   previewType.value = f.media_type
   previewName.value = f.name
-  previewDuration.value = 0
-  previewCurrentTime.value = 0
-  isTranscoding.value = needTranscode
-  currentFilePath.value = f.path
+
   if (f.media_type === 'image') {
     previewUrl.value = withToken(`/api/stream/${props.shareId}/${f.path}`)
   } else {
-    previewUrl.value = withToken(`/api/${needTranscode ? 'transcode' : 'stream'}/${props.shareId}/${f.path}`)
-    if (f.media_type === 'video') {
-      api(`/api/info/${props.shareId}/${f.path}`).then((info: any) => {
-        if (info.duration) previewDuration.value = info.duration
-      }).catch(() => {})
-    }
+    previewUrl.value = withToken(`/api/stream/${props.shareId}/${f.path}`)
   }
   showPreview.value = true
-  // 初始化 Plyr 播放器
+
+  // avbridge 初始化播放器（自动检测格式，选择最优解码策略）
   if (f.media_type !== 'image') {
     await nextTick()
     if (videoRef.value) {
-      plyr?.destroy()
-      plyr = new Plyr(videoRef.value, {
-        controls: ['play', 'progress', 'current-time', 'duration', 'mute', 'fullscreen'],
-        seekTime: 10,
-      })
-      // 转码视频：拖进度条时用 ?start= 重新加载流
-      if (needTranscode) {
-        const setupSeek = () => {
-          plyr!.on('seeked', () => {
-            const v = videoRef.value!
-            const t = v.currentTime
-            nextTick(() => {
-              plyr?.destroy()
-              v.src = withToken(`/api/transcode/${props.shareId}/${currentFilePath.value}?start=${t}`)
-              plyr = new Plyr(v, {
-                controls: ['play', 'progress', 'current-time', 'duration', 'mute', 'fullscreen'],
-                seekTime: 10,
-              })
-              v.play().catch(() => {})
-              setupSeek()
-            })
-          })
-        }
-        setupSeek()
-      }
+      if (player) { await player.destroy(); player = null }
+      try {
+        player = await createPlayer({
+          source: previewUrl.value,
+          target: videoRef.value,
+        })
+        player.on('strategy', ({ strategy, reason }: any) => {
+          console.log(`avbridge: ${strategy} - ${reason}`)
+        })
+        await player.play()
+      } catch { /* 非视频文件会 fallback */ }
     }
   }
 }
 
 
-function fmtTime(s: number) {
-  if (!s || s <= 0) return '--:--'
-  const m = Math.floor(s / 60), sec = Math.floor(s % 60)
-  return m + ':' + sec.toString().padStart(2, '0')
-}
-
-function closePreview() { showPreview.value = false; previewUrl.value = ''; plyr?.destroy(); plyr = null; stopLongPress() }
+function closePreview() { showPreview.value = false; previewUrl.value = ''; if (player) { player.destroy(); player = null }; stopLongPress() }
 
 // === 长按倍速 / 滑动进度条 ===
 let longPressTimer: any = null
@@ -186,12 +142,9 @@ function onTouchEnd(e: TouchEvent) {
   clearTimeout(longPressTimer)
   clearTimeout(longPressInterval)
   longPressInterval = null
-  // 恢复原速（也重置 Plyr 内部状态）
+  // 恢复原速
   const v = videoRef.value
-  if (v) {
-    v.playbackRate = 1
-    const pe = v.closest('.plyr') as any; if (pe && pe.plyr) pe.plyr.speed = 1
-  }
+  if (v) { v.playbackRate = 1 }
   speedHint.value = ''
   // 保持显示 600ms 后淡出
   setTimeout(() => { speedHint.value = '' }, 600)
@@ -356,9 +309,8 @@ const filteredFiles = computed(() => {
 
       <div class="absolute inset-0 flex items-center justify-center">
         <video v-if="previewType === 'video' || previewType === 'audio'"
-          ref="videoRef" :src="previewUrl" :key="previewUrl"
-          class="w-full h-full object-contain" playsinline />
-        <!-- Speed hint -->
+          ref="videoRef"
+          class="w-full h-full object-contain" playsinline controls />
         <img v-else-if="previewType === 'image'" :src="previewUrl" class="w-full h-full object-contain" />
       </div>
     </div>

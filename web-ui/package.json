@@ -9,8 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "hls.js": "^1.6.16",
-    "plyr": "^3.8.4",
+    "avbridge": "^2.12.1",
     "vue": "^3.4",
     "vue-router": "^4.3"
   },
