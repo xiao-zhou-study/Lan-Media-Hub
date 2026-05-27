@@ -103,7 +103,7 @@ import QRCode from "qrcode";
       <div v-if="loadingFiles" class="text-center py-12 text-slate-400 text-sm">加载中...</div>
       <div v-else-if="files.length===0" class="text-center py-12 text-slate-400 text-sm">空目录</div>
       <div v-else class="bg-white rounded-xl border shadow-sm overflow-hidden">
-        <div v-for="f in files" :key="f.path" class="flex items-center gap-3 px-4 py-2.5 border-b border-slate-50 last:border-0 hover:bg-slate-50 cursor-pointer text-sm">
+        <div v-for="f in files" :key="f.path" @click="f.is_dir ? navigateTo(f.path) : null" class="flex items-center gap-3 px-4 py-2.5 border-b border-slate-50 last:border-0 hover:bg-slate-50 cursor-pointer text-sm">
           <span class="text-lg w-6 text-center">{{ f.is_dir?'📁':'📄' }}</span>
           <span class="flex-1 truncate" :class="f.is_dir?'font-medium text-blue-600':''">{{ f.name }}</span>
           <span class="text-xs text-slate-400">{{ f.is_dir?'':fmtSize(f.size) }}</span>
