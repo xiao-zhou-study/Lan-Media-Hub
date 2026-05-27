@@ -14,8 +14,30 @@ fn ffmpeg_path() -> String {
     ffmpeg_sidecar::paths::ffmpeg_path().to_string_lossy().to_string()
 }
 
-/// 实时流转码——FFmpeg 边转边输出 fragmented MP4，不落盘，内存仅编码缓冲区
-/// 类似 Jellyfin/Plex 的做法：pipe:1 直接流式输出
+fn ffprobe_path() -> String {
+    let ffmpeg = ffmpeg_sidecar::paths::ffmpeg_path();
+    ffmpeg.with_file_name(if cfg!(windows) { "ffprobe.exe" } else { "ffprobe" })
+        .to_string_lossy().to_string()
+}
+
+/// ffprobe 检测源视频编码，判断是否能直接 remux（无需重编码）
+async fn probe_video_codec(path: &PathBuf) -> String {
+    match tokio::process::Command::new(ffprobe_path())
+        .arg("-v").arg("error")
+        .arg("-select_streams").arg("v:0")
+        .arg("-show_entries").arg("stream=codec_name")
+        .arg("-of").arg("csv=p=0")
+        .arg(path.to_string_lossy().to_string())
+        .output().await
+    {
+        Ok(o) => String::from_utf8(o.stdout).unwrap_or_default().trim().to_string(),
+        Err(_) => String::new(),
+    }
+}
+
+/// 实时流转码 / remux
+/// - H.264 源：直接 remux（-c:v copy），CPU 占用 < 5%，秒开
+/// - 其他编码：重编码到 H.264（-c:v libx264），CPU 高但兼容所有格式
 pub async fn transcode_video(
     _auth: crate::auth::Auth,
     Path(rest): Path<String>,
@@ -33,19 +55,30 @@ pub async fn transcode_video(
 
     let start = params.get("start").and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
 
+    // 检测源编码：H.264 → remux，否则 → 重编码
+    let codec = probe_video_codec(&clean).await;
+    let can_remux = codec == "h264";
+    tracing::debug!(?codec, can_remux, "transcode decision");
+
     let mut cmd = tokio::process::Command::new(ffmpeg_path());
     if start > 0.0 {
         cmd.arg("-ss").arg(format!("{:.3}", start));
     }
-    cmd.arg("-i").arg(clean.to_string_lossy().to_string())
-       .arg("-c:v").arg("libx264")
-       .arg("-preset").arg("ultrafast")
-       .arg("-crf").arg("23")
-       .arg("-c:a").arg("aac")
+    cmd.arg("-i").arg(clean.to_string_lossy().to_string());
+
+    if can_remux {
+        cmd.arg("-c:v").arg("copy");
+    } else {
+        cmd.arg("-c:v").arg("libx264")
+           .arg("-preset").arg("ultrafast")
+           .arg("-crf").arg("23")
+           .arg("-vf").arg("scale=trunc(iw/2)*2:trunc(ih/2)*2");
+    }
+
+    cmd.arg("-c:a").arg("aac")
        .arg("-b:a").arg("128k")
-       .arg("-vf").arg("scale=trunc(iw/2)*2:trunc(ih/2)*2")
-       .arg("-f").arg("mp4")
        .arg("-movflags").arg("frag_keyframe+empty_moov")
+       .arg("-f").arg("mp4")
        .arg("pipe:1")
        .stdout(std::process::Stdio::piped())
        .stderr(std::process::Stdio::null());
@@ -57,7 +90,6 @@ pub async fn transcode_video(
 
     let stdout = child.stdout.take().unwrap();
 
-    // 连接断开/流结束时管道破裂，FFmpeg 写入失败自动退出
     tokio::spawn(async move { let _ = child.wait().await; });
 
     let stream = ReaderStream::with_capacity(stdout, 256 * 1024);
