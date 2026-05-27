@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, computed, nextTick } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
-import { createPlayer } from 'avbridge'
 
 const props = defineProps<{ shareId: string; path?: string[] }>()
 const router = useRouter()
@@ -21,8 +20,6 @@ const previewType = ref('')
 const previewName = ref('')
 const showPreview = ref(false)
 const speedHint = ref('')
-const speedSide = ref<'left' | 'right'>('right')
-let player: any = null
 const videoRef = ref<HTMLVideoElement>()
 
 const displayPath = computed(() => {
@@ -70,37 +67,21 @@ function goBack() {
 
 async function handleClick(f: any) {
   if (f.is_dir) { navTo(f.path); return }
+  const ext = (f.name.split(".").pop() || "").toLowerCase()
+  const nativeExts = ["mp4", "m4v", "webm", "mkv", "mov", "ogv", "ogg", "mp3", "wav", "aac", "m4a", "flac"]
+  const needTranscode = f.media_type === "video" && !nativeExts.includes(ext)
   previewType.value = f.media_type
   previewName.value = f.name
 
-  if (f.media_type === 'image') {
+  if (f.media_type === "image") {
     previewUrl.value = withToken(`/api/stream/${props.shareId}/${f.path}`)
   } else {
-    previewUrl.value = withToken(`/api/stream/${props.shareId}/${f.path}`)
+    previewUrl.value = withToken(`/api/${needTranscode ? "transcode" : "stream"}/${props.shareId}/${f.path}`)
   }
   showPreview.value = true
-
-  // avbridge 初始化播放器（自动检测格式，选择最优解码策略）
-  if (f.media_type !== 'image') {
-    await nextTick()
-    if (videoRef.value) {
-      if (player) { await player.destroy(); player = null }
-      try {
-        player = await createPlayer({
-          source: previewUrl.value,
-          target: videoRef.value,
-        })
-        player.on('strategy', ({ strategy, reason }: any) => {
-          console.log(`avbridge: ${strategy} - ${reason}`)
-        })
-        await player.play()
-      } catch { /* 非视频文件会 fallback */ }
-    }
-  }
 }
 
-
-function closePreview() { showPreview.value = false; previewUrl.value = ''; if (player) { player.destroy(); player = null }; stopLongPress() }
+function closePreview() { showPreview.value = false; previewUrl.value = ""; stopLongPress() }
 
 // === 长按倍速 / 滑动进度条 ===
 let longPressTimer: any = null
@@ -119,7 +100,6 @@ function onTouchStart(e: TouchEvent) {
   longPressStart = Date.now()
   const isRight = touchStartX > window.innerWidth / 2
   longPressing = true
-  speedSide.value = isRight ? 'right' : 'left'
   longPressTimer = setTimeout(() => {
     const checkSpeed = () => {
         if (!longPressing) return

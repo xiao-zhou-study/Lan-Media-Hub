@@ -24,7 +24,6 @@ pub fn create_router() -> Router<AppState> {
     Router::new()
         .nest("/api", api::create_api_router())
         .nest_service("/assets", ServeDir::new(web_dir.join("assets")))
-        .nest_service("/vendor", ServeDir::new(web_dir.join("vendor")))
         .route("/", get(move || serve_index(web_dir1)))
         .fallback(get(move || serve_index(web_dir2)))
         .layer(CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any))

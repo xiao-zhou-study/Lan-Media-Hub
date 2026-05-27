@@ -9,7 +9,6 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "avbridge": "^2.12.1",
     "vue": "^3.4",
     "vue-router": "^4.3"
   },
