@@ -29,7 +29,9 @@ pub async fn get_thumbnail(
     let full_path = if file_path.is_empty() { share.config.path.clone() } else { share.config.path.join(&file_path) };
     let clean: PathBuf = path_clean::PathClean::clean(&full_path);
     if !clean.starts_with(&share.config.path) { return (StatusCode::FORBIDDEN, "Out of bounds").into_response() }
-    if !clean.exists() { return (StatusCode::NOT_FOUND, "Not found").into_response() }
+    if !clean.exists() { tracing::warn!("Thumbnail file not found: {:?}", clean); return (StatusCode::NOT_FOUND, "Not found").into_response() }
+
+    tracing::debug!("Thumbnail request: {:?}", clean);
 
     let ext = clean.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
     // .bc! 后缀 → 看前面的扩展名
@@ -45,10 +47,11 @@ pub async fn get_thumbnail(
         if cache_path.exists() { return serve_file(&cache_path, "image/jpeg").await; }
 
         let output = cache_dir.join(format!("{}.tmp.jpg", cache_key));
+        let is_bc = ext == "bc!";
         let result = tokio::process::Command::new(ffmpeg_path())
             .arg("-y")
-            .arg("-err_detect").arg("ignore_err")  // 容忍不完整文件（.bc! 等）
-            .arg("-ss").arg("3")
+            .arg("-err_detect").arg("ignore_err")
+            .arg("-ss").arg(if is_bc { "0" } else { "3" })  // .bc! 不完整文件从头读
             .arg("-i").arg(clean.to_string_lossy().to_string())
             .arg("-vframes").arg("1")
             .arg("-vf").arg(format!("scale={}:-1", params.size))

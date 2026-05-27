@@ -74,7 +74,16 @@ pub async fn transcode_video(
     if !clean.exists() || !clean.is_file() { return (StatusCode::NOT_FOUND,"Not found").into_response() }
 
     let codec = probe_video_codec(&clean).await;
-    let can_remux = codec == "h264";
+    // ffprobe 可能读不到不完整的 .bc! 文件 → 根据扩展名推测
+    let can_remux = if codec.is_empty() {
+        let ext = clean.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+        let real_ext = if ext == "bc!" {
+            clean.with_extension("").extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).unwrap_or_default()
+        } else { ext };
+        matches!(real_ext.as_str(), "mp4" | "m4v" | "mkv" | "mov" | "webm")
+    } else {
+        codec == "h264"
+    };
     let use_qsv = !can_remux && qsv_available();
 
     // 缓存 key：文件 hash + 编码策略
