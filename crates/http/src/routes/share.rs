@@ -116,6 +116,23 @@ pub async fn stream_video(
     stream_file(clean, &headers).await
 }
 
+/// 公开接口：直接从磁盘路径提供文件流（缓存命中用）
+pub async fn serve_cached_file(path: &std::path::PathBuf) -> Response {
+    use axum::body::Body;
+    use tokio_util::io::ReaderStream;
+    match tokio::fs::File::open(path).await {
+        Ok(file) => {
+            let stream = ReaderStream::with_capacity(file, 256 * 1024);
+            Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "video/mp4")
+                .header(header::ACCEPT_RANGES, "bytes")
+                .body(Body::from_stream(stream)).unwrap()
+        }
+        Err(_) => (StatusCode::NOT_FOUND, "Not found").into_response(),
+    }
+}
+
 /// 流式传输文件，支持 Range 请求（视频 seek 的关键）
 async fn stream_file(path: PathBuf, headers: &axum::http::HeaderMap) -> Response {
     use tokio::fs::File;

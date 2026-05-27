@@ -4,9 +4,11 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use axum::body::Body;
+use bytes::Bytes;
 use std::path::PathBuf;
 use std::collections::HashMap;
-use tokio_util::io::ReaderStream;
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tokio_stream::wrappers::ReceiverStream;
 use crate::server::AppState;
 use super::share::parse_rest;
 
@@ -20,7 +22,12 @@ fn ffprobe_path() -> String {
         .to_string_lossy().to_string()
 }
 
-/// ffprobe 检测源视频编码，判断是否能直接 remux（无需重编码）
+fn transcode_cache_dir() -> PathBuf {
+    let dir = if let Ok(a) = std::env::var("LOCALAPPDATA") { PathBuf::from(a).join("LanMediaHub").join("transcode") } else { PathBuf::from("transcode") };
+    let _ = std::fs::create_dir_all(&dir); dir
+}
+
+/// ffprobe 检测源视频编码
 async fn probe_video_codec(path: &PathBuf) -> String {
     match tokio::process::Command::new(ffprobe_path())
         .arg("-v").arg("error")
@@ -35,9 +42,9 @@ async fn probe_video_codec(path: &PathBuf) -> String {
     }
 }
 
-/// 实时流转码 / remux
-/// - H.264 源：直接 remux（-c:v copy），CPU 占用 < 5%，秒开
-/// - 其他编码：重编码到 H.264（-c:v libx264），CPU 高但兼容所有格式
+/// 流式转码 + 磁盘缓存
+/// - 首次播放：FFmpeg 边写缓存文件边通过 channel 流式传给客户端
+/// - 后续播放/seek：直接走缓存文件，支持 Range
 pub async fn transcode_video(
     _auth: crate::auth::Auth,
     Path(rest): Path<String>,
@@ -53,12 +60,19 @@ pub async fn transcode_video(
     if !clean.starts_with(&share.config.path) { return (StatusCode::FORBIDDEN,"Out of bounds").into_response() }
     if !clean.exists() || !clean.is_file() { return (StatusCode::NOT_FOUND,"Not found").into_response() }
 
-    let start = params.get("start").and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
-
-    // 检测源编码：H.264 → remux，否则 → 重编码
     let codec = probe_video_codec(&clean).await;
     let can_remux = codec == "h264";
-    tracing::debug!(?codec, can_remux, "transcode decision");
+
+    // 缓存 key：文件路径 + remux/transcode
+    let cache_key = format!("{:x}_{}", md5::compute(clean.to_string_lossy().as_bytes()), if can_remux { "remux" } else { "transcode" });
+    let cache_path = transcode_cache_dir().join(&cache_key);
+
+    // 缓存命中 → 直接走文件流（支持 Range）
+    if cache_path.exists() {
+        return super::share::serve_cached_file(&cache_path).await;
+    }
+
+    let start = params.get("start").and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
 
     let mut cmd = tokio::process::Command::new(ffmpeg_path());
     if start > 0.0 {
@@ -79,8 +93,8 @@ pub async fn transcode_video(
        .arg("-b:a").arg("128k")
        .arg("-movflags").arg("frag_keyframe+empty_moov")
        .arg("-f").arg("mp4")
-       .arg("pipe:1")
-       .stdout(std::process::Stdio::piped())
+       .arg(cache_path.to_string_lossy().to_string())
+       .stdout(std::process::Stdio::null())
        .stderr(std::process::Stdio::null());
 
     let mut child = match cmd.spawn() {
@@ -88,12 +102,58 @@ pub async fn transcode_video(
         Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "FFmpeg failed to start").into_response(),
     };
 
-    let stdout = child.stdout.take().unwrap();
+    // 等缓存文件开始写入
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
-    tokio::spawn(async move { let _ = child.wait().await; });
+    let cache = cache_path.clone();
+    let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(64);
 
-    let stream = ReaderStream::with_capacity(stdout, 256 * 1024);
+    // 后台任务：边读缓存文件边发到 channel，FFmpeg 退出后结束
+    tokio::spawn(async move {
+        match tokio::fs::File::open(&cache).await {
+            Ok(mut file) => {
+                let mut pos = 0u64;
+                loop {
+                    match file.metadata().await {
+                        Ok(meta) if meta.len() > pos => {
+                            let to_read = ((meta.len() - pos) as usize).min(256 * 1024);
+                            if file.seek(std::io::SeekFrom::Start(pos)).await.is_err() { break; }
+                            let mut buf = vec![0u8; to_read];
+                            match file.read_exact(&mut buf).await {
+                                Ok(_) => {
+                                    pos += to_read as u64;
+                                    if tx.send(Ok(Bytes::from(buf))).await.is_err() { break; }
+                                }
+                                Err(_) => break,
+                            }
+                        }
+                        Err(_) => break,
+                        _ => {}
+                    }
+                    // 检查 FFmpeg 是否还在跑；如果已退出且无新数据 → 结束
+                    match child.try_wait() {
+                        Ok(Some(_)) => {
+                            // FFmpeg 退出，读完最后的数据
+                            match file.metadata().await {
+                                Ok(meta) if meta.len() > pos => continue,
+                                _ => break,
+                            }
+                        }
+                        Ok(None) => {} // 还在跑，继续等
+                        Err(_) => break,
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+                }
+            }
+            Err(_) => {}
+        }
+        tracing::debug!("transcode cache done: {:?}", cache);
+    });
 
+    // 清理旧缓存：总大小超过 5GB 时删除最旧文件
+    tokio::spawn(cleanup_old_cache());
+
+    let stream = ReceiverStream::new(rx);
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "video/mp4")
@@ -102,7 +162,39 @@ pub async fn transcode_video(
         .unwrap()
 }
 
-/// HLS 分片兼容（旧缓存可继续使用，新方案不再生成）
+/// 清理旧转码缓存，总大小超 5GB 时删除最旧文件
+async fn cleanup_old_cache() {
+    let dir = transcode_cache_dir();
+    let mut entries: Vec<_> = match tokio::fs::read_dir(&dir).await {
+        Ok(mut rd) => {
+            let mut v = Vec::new();
+            while let Ok(Some(e)) = rd.next_entry().await {
+                if let Ok(meta) = e.metadata().await {
+                    if meta.is_file() {
+                        if let Ok(modified) = meta.modified() {
+                            v.push((e.path(), meta.len(), modified));
+                        }
+                    }
+                }
+            }
+            v
+        }
+        Err(_) => return,
+    };
+
+    let total: u64 = entries.iter().map(|(_, s, _)| s).sum();
+    if total < 5 * 1024 * 1024 * 1024 { return; } // < 5GB
+
+    entries.sort_by_key(|(_, _, m)| *m); // 按修改时间排序，最旧的在前
+    let mut to_free = total - 4 * 1024 * 1024 * 1024; // 留 4GB
+    for (p, s, _) in entries {
+        if to_free == 0 { break; }
+        let _ = tokio::fs::remove_file(&p).await;
+        to_free = to_free.saturating_sub(s);
+    }
+}
+
+/// HLS 分片兼容
 pub async fn hls_segment(
     _auth: crate::auth::Auth,
     Path(rest): Path<String>,
