@@ -96,8 +96,6 @@ async function handleClick(f: any) {
   previewCurrentTime.value = 0
   currentFilePath.value = f.path
   isTranscoding.value = needTranscode
-
-
   if (f.media_type === 'image') {
     previewUrl.value = withToken(`/api/stream/${props.shareId}/${f.path}`)
   } else {
@@ -285,14 +283,6 @@ const filteredFiles = computed(() => {
   return files.value.filter((f: any) => f.name.toLowerCase().includes(q))
 })
 
-const uploadInput = ref<HTMLInputElement>()
-async function onUpload(e: Event) {
-  const inp = e.target as HTMLInputElement; if (!inp.files?.length) return
-  const file = inp.files[0]; const fd = new FormData(); fd.append('file', file)
-  const sub = displayPath.value
-  await fetch(`/api/upload/${props.shareId}?path=${encodeURIComponent(sub ? sub + '/' + file.name : file.name)}`, { method: 'POST', body: fd })
-  await loadFiles(); inp.value = ''
-}
 </script>
 
 <template>
@@ -302,8 +292,6 @@ async function onUpload(e: Event) {
       <div class="flex items-center gap-2 px-3 py-3">
         <button @click="goBack" class="text-blue-500 font-medium text-sm shrink-0">‹ 返回</button>
         <h1 class="text-sm font-semibold truncate flex-1">{{ shareName || '浏览' }}</h1>
-        <button @click="uploadInput?.click()" class="text-xs px-3 py-1.5 bg-blue-500 text-white rounded-full font-medium shrink-0">+ 上传</button>
-        <input ref="uploadInput" type="file" hidden @change="onUpload" />
       </div>
       <!-- Breadcrumb -->
       <div class="flex items-center gap-1 px-3 pb-1 text-[11px] text-gray-400 overflow-x-auto">
