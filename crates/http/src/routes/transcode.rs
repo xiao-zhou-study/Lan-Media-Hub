@@ -72,6 +72,7 @@ pub async fn transcode_video(
 
 /// HLS 分片兼容（旧缓存可继续使用，新方案不再生成）
 pub async fn hls_segment(
+    _auth: crate::auth::Auth,
     Path(rest): Path<String>,
     State(_state): State<AppState>,
 ) -> Response {
