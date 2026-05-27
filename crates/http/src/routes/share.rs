@@ -263,3 +263,90 @@ fn file_modified(p: &PathBuf) -> String {
     }
     String::new()
 }
+
+// ── playback/start 端点 ──
+
+#[derive(Deserialize)]
+pub struct PlaybackRequest {
+    pub path: String,
+    #[serde(default)]
+    pub client_caps: ClientCapabilities,
+}
+
+#[derive(Deserialize, Default)]
+pub struct ClientCapabilities {
+    #[serde(default)]
+    pub codecs: Vec<String>,
+    pub max_width: Option<u32>,
+}
+
+#[derive(Serialize)]
+pub struct PlaybackResponse {
+    pub method: String,
+    pub url: String,
+}
+
+/// 客户端能力协商：根据文件编码和客户端能力返回最优播放 URL
+pub async fn playback_start(
+    _auth: crate::auth::Auth,
+    State(state): State<AppState>,
+    Path(rest): Path<String>,
+    Json(body): Json<PlaybackRequest>,
+) -> Response {
+    let (id, file_path) = parse_rest(&rest);
+    let manager = state.manager.read().await;
+    let uuid = match uuid::Uuid::parse_str(&id) { Ok(u)=>u, Err(_)=>return (StatusCode::BAD_REQUEST,"Bad ID").into_response() };
+    let share = match manager.get_share(uuid) { Some(s)=>s, None=>return (StatusCode::NOT_FOUND,"Not found").into_response() };
+    let full_path = if file_path.is_empty() { share.config.path.join(&body.path) } else { share.config.path.join(&file_path) };
+    let clean: PathBuf = path_clean::PathClean::clean(&full_path);
+    if !clean.starts_with(&share.config.path) { return (StatusCode::FORBIDDEN,"Out of bounds").into_response() }
+
+    let media_type = classify(&clean);
+    if media_type == "image" {
+        return Json(PlaybackResponse {
+            method: "direct".into(),
+            url: format!("/api/stream/{}/{}", id, body.path),
+        }).into_response();
+    }
+
+    let ext = clean.extension().and_then(|e|e.to_str()).unwrap_or("").to_lowercase();
+    // 浏览器原生支持的格式 → direct
+    let native_exts = ["mp4", "m4v", "webm", "mkv", "mov", "ogv", "ogg", "mp3", "wav", "aac", "m4a", "flac"];
+    if native_exts.contains(&ext.as_str()) {
+        return Json(PlaybackResponse {
+            method: "direct".into(),
+            url: format!("/api/stream/{}/{}", id, body.path),
+        }).into_response();
+    }
+
+    // 需要转码：检查编码决定 remux 还是 transcode
+    if media_type == "video" || media_type == "audio" {
+        let codec = probe_video_codec_inline(&clean).await;
+        let method = if codec == "h264" { "remux" } else { "transcode" };
+        return Json(PlaybackResponse {
+            method: method.into(),
+            url: format!("/api/transcode/{}/{}", id, body.path),
+        }).into_response();
+    }
+
+    Json(PlaybackResponse { method: "direct".into(), url: format!("/api/stream/{}/{}", id, body.path) }).into_response()
+}
+
+async fn probe_video_codec_inline(path: &PathBuf) -> String {
+    let ffprobe = {
+        let ffmpeg = ffmpeg_sidecar::paths::ffmpeg_path();
+        ffmpeg.with_file_name(if cfg!(windows) { "ffprobe.exe" } else { "ffprobe" })
+            .to_string_lossy().to_string()
+    };
+    match tokio::process::Command::new(&ffprobe)
+        .arg("-v").arg("error")
+        .arg("-select_streams").arg("v:0")
+        .arg("-show_entries").arg("stream=codec_name")
+        .arg("-of").arg("csv=p=0")
+        .arg(path.to_string_lossy().to_string())
+        .output().await
+    {
+        Ok(o) => String::from_utf8(o.stdout).unwrap_or_default().trim().to_string(),
+        Err(_) => String::new(),
+    }
+}

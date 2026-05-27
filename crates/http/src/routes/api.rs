@@ -1,4 +1,4 @@
-use crate::routes::share::{list_shares, get_share_info, browse_share, stream_video, upload_file};
+use crate::routes::share::{list_shares, get_share_info, browse_share, stream_video, upload_file, playback_start};
 use crate::routes::auth::{verify_password, login};
 use crate::routes::transcode::{transcode_video, hls_segment};
 use crate::routes::thumbnail::get_thumbnail;
@@ -20,4 +20,5 @@ pub fn create_api_router() -> Router<AppState> {
         .route("/thumbnail/*rest", axum::routing::get(get_thumbnail))
         .route("/info/*rest", axum::routing::get(get_file_info))
         .route("/upload/*rest", axum::routing::post(upload_file))
+        .route("/playback/*rest", axum::routing::post(playback_start))
 }
