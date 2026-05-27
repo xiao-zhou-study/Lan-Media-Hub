@@ -3,7 +3,6 @@ import { ref, onMounted, watch, computed, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import Plyr from 'plyr'
 import 'plyr/dist/plyr.css'
-import Hls from 'hls.js'
 
 // 竖版视频适配
 const plyrOverrideStyle = `
@@ -31,9 +30,6 @@ const previewName = ref('')
 const previewDuration = ref(0)
 const previewCurrentTime = ref(0)
 const showPreview = ref(false)
-const seekInput = ref('')
-const isTranscoding = ref(false)
-const currentFilePath = ref("")
 const speedHint = ref('')
 const speedSide = ref<'left' | 'right'>('right')
 let plyr: Plyr | null = null
@@ -87,20 +83,16 @@ function goBack() {
 async function handleClick(f: any) {
   if (f.is_dir) { navTo(f.path); return }
   const ext = (f.name.split('.').pop() || '').toLowerCase()
-  // 浏览器原生支持的格式（白名单），其余全部 HLS 转码
   const nativeExts = ['mp4', 'm4v', 'webm', 'mkv', 'mov', 'ogv', 'ogg', 'mp3', 'wav', 'aac', 'm4a', 'flac']
   const needTranscode = f.media_type === 'video' && !nativeExts.includes(ext)
   previewType.value = f.media_type
   previewName.value = f.name
   previewDuration.value = 0
   previewCurrentTime.value = 0
-  currentFilePath.value = f.path
-  isTranscoding.value = needTranscode
   if (f.media_type === 'image') {
     previewUrl.value = withToken(`/api/stream/${props.shareId}/${f.path}`)
   } else {
     previewUrl.value = withToken(`/api/${needTranscode ? 'transcode' : 'stream'}/${props.shareId}/${f.path}`)
-    // 获取视频时长
     if (f.media_type === 'video') {
       api(`/api/info/${props.shareId}/${f.path}`).then((info: any) => {
         if (info.duration) previewDuration.value = info.duration
@@ -113,41 +105,14 @@ async function handleClick(f: any) {
     await nextTick()
     if (videoRef.value) {
       plyr?.destroy()
-      const v = videoRef.value
-      if (needTranscode) {
-        // HLS 流：hls.js 接管视频源
-        if (Hls.isSupported()) {
-          const hls = new Hls({ enableWorker: false })
-          hls.loadSource(withToken(`/api/transcode/${props.shareId}/${f.path}`))
-          hls.attachMedia(v)
-          hls.on(Hls.Events.MANIFEST_PARSED, () => { v.play().catch(()=>{}) })
-        } else if (v.canPlayType('application/vnd.apple.mpegurl')) {
-          // Safari 原生 HLS
-          v.src = withToken(`/api/transcode/${props.shareId}/${f.path}`)
-        }
-      }
-      plyr = new Plyr(v, {
+      plyr = new Plyr(videoRef.value, {
         controls: ['play', 'progress', 'current-time', 'duration', 'mute', 'fullscreen'],
         seekTime: 10,
-        autoplay: !needTranscode,
       })
     }
   }
 }
 
-function doSeek() {
-  const t = parseFloat(seekInput.value)
-  if (isNaN(t) || t < 0) return
-  const ext = (previewName.value.split('.').pop() || '').toLowerCase()
-  const native = ['mp4', 'webm', 'ogg', 'mp3', 'wav', 'aac', 'm4a']
-  previewCurrentTime.value = t
-  if (!native.includes(ext)) {
-    previewUrl.value = withToken(`/api/transcode/${props.shareId}/${displayPath.value ? displayPath.value + '/' : ''}${previewName.value}?start=${t}`)
-  }
-  // 原生格式用 video.currentTime
-  const v = document.querySelector('video') as HTMLVideoElement
-  if (v) v.currentTime = t
-}
 
 function fmtTime(s: number) {
   if (!s || s <= 0) return '--:--'
@@ -367,7 +332,7 @@ const filteredFiles = computed(() => {
 
       <div class="absolute inset-0 flex items-center justify-center">
         <video v-if="previewType === 'video' || previewType === 'audio'"
-          ref="videoRef" :src="isTranscoding ? undefined : previewUrl" :key="previewUrl"
+          ref="videoRef" :src="previewUrl" :key="previewUrl"
           class="w-full h-full object-contain" playsinline />
         <!-- Speed hint -->
         <img v-else-if="previewType === 'image'" :src="previewUrl" class="w-full h-full object-contain" />
