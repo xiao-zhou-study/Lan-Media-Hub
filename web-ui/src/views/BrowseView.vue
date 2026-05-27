@@ -30,6 +30,8 @@ const previewName = ref('')
 const previewDuration = ref(0)
 const previewCurrentTime = ref(0)
 const showPreview = ref(false)
+const isTranscoding = ref(false)
+const currentFilePath = ref("")
 const speedHint = ref('')
 const speedSide = ref<'left' | 'right'>('right')
 let plyr: Plyr | null = null
@@ -89,6 +91,8 @@ async function handleClick(f: any) {
   previewName.value = f.name
   previewDuration.value = 0
   previewCurrentTime.value = 0
+  isTranscoding.value = needTranscode
+  currentFilePath.value = f.path
   if (f.media_type === 'image') {
     previewUrl.value = withToken(`/api/stream/${props.shareId}/${f.path}`)
   } else {
@@ -109,6 +113,26 @@ async function handleClick(f: any) {
         controls: ['play', 'progress', 'current-time', 'duration', 'mute', 'fullscreen'],
         seekTime: 10,
       })
+      // 转码视频：拖进度条时用 ?start= 重新加载流
+      if (needTranscode) {
+        const setupSeek = () => {
+          plyr!.on('seeked', () => {
+            const v = videoRef.value!
+            const t = v.currentTime
+            nextTick(() => {
+              plyr?.destroy()
+              v.src = withToken(`/api/transcode/${props.shareId}/${currentFilePath.value}?start=${t}`)
+              plyr = new Plyr(v, {
+                controls: ['play', 'progress', 'current-time', 'duration', 'mute', 'fullscreen'],
+                seekTime: 10,
+              })
+              v.play().catch(() => {})
+              setupSeek()
+            })
+          })
+        }
+        setupSeek()
+      }
     }
   }
 }
