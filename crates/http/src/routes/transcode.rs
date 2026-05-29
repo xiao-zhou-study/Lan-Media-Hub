@@ -62,6 +62,7 @@ pub async fn transcode_video(
     _auth: crate::auth::Auth,
     Path(rest): Path<String>,
     Query(params): Query<HashMap<String, String>>,
+    headers: axum::http::HeaderMap,
     State(state): State<AppState>,
 ) -> Response {
     let (id, file_path) = parse_rest(&rest);
@@ -73,24 +74,34 @@ pub async fn transcode_video(
     if !clean.starts_with(&share.config.path) { return (StatusCode::FORBIDDEN,"Out of bounds").into_response() }
     if !clean.exists() || !clean.is_file() { return (StatusCode::NOT_FOUND,"Not found").into_response() }
 
+    // 先算缓存 key（只基于路径，不做 ffprobe），命中则直接返回
+    let path_hash = format!("{:x}", md5::compute(clean.to_string_lossy().as_bytes()));
+    // 尝试三种可能的缓存 key（未知编码策略时先试几个）
+    for profile in &["remux", "qsv", "sw"] {
+        let probe_path = transcode_cache_dir().join(format!("{}_{}", path_hash, profile));
+        if probe_path.exists() {
+            return super::share::serve_cached_file(&probe_path, &headers).await;
+        }
+    }
+
     let codec = probe_video_codec(&clean).await;
-    // 仅 ffprobe 确认 H.264 时才 remux；不完整文件（.bc!）走重编码更耐受
     let can_remux = codec == "h264";
     let is_bc = clean.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase() == "bc!";
-    // .bc! 不完整文件不用 QSV 硬解码（GPU 对损坏数据容错差），走软件编码
     let use_qsv = !can_remux && qsv_available() && !is_bc;
 
-    // 缓存 key：文件 hash + 编码策略
     let profile = if can_remux { "remux" } else if use_qsv { "qsv" } else { "sw" };
-    let cache_key = format!("{:x}_{}", md5::compute(clean.to_string_lossy().as_bytes()), profile);
+    let cache_key = format!("{}_{}", path_hash, profile);
     let cache_path = transcode_cache_dir().join(&cache_key);
 
     // 缓存命中 → 直接走文件流
     if cache_path.exists() {
-        return super::share::serve_cached_file(&cache_path).await;
+        return super::share::serve_cached_file(&cache_path, &headers).await;
     }
 
     let start = params.get("start").and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+
+    // 写临时文件，成功后 rename 到缓存路径（避免损坏文件被服务）
+    let tmp_path = cache_path.with_extension("tmp.mp4");
 
     let mut cmd = tokio::process::Command::new(ffmpeg_path());
 
@@ -122,7 +133,7 @@ pub async fn transcode_video(
        .arg("-b:a").arg("128k")
        .arg("-movflags").arg("frag_keyframe+empty_moov")
        .arg("-f").arg("mp4")
-       .arg(cache_path.to_string_lossy().to_string())
+       .arg(tmp_path.to_string_lossy().to_string())
        .stdout(std::process::Stdio::null())
        .stderr(std::process::Stdio::null());
 
@@ -134,7 +145,8 @@ pub async fn transcode_video(
     // 等缓存文件开始写入
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
-    let cache = cache_path.clone();
+    let cache = tmp_path.clone();
+    let final_path = cache_path.clone();
     let (tx, rx) = tokio::sync::mpsc::channel::<Result<Bytes, std::io::Error>>(64);
 
     // 后台任务：边读缓存文件边发到 channel，FFmpeg 退出后结束
@@ -176,7 +188,13 @@ pub async fn transcode_video(
             }
             Err(_) => {}
         }
-        tracing::debug!("transcode cache done: {:?}", cache);
+        // FFmpeg 成功后 rename，失败则清理 tmp
+        if child.wait().await.map(|s| s.success()).unwrap_or(false) {
+            let _ = tokio::fs::rename(&cache, &final_path).await;
+        } else {
+            let _ = tokio::fs::remove_file(&cache).await;
+        }
+        tracing::debug!("transcode cache done: {:?}", final_path);
     });
 
     // 清理旧缓存：总大小超过 5GB 时删除最旧文件
@@ -191,8 +209,12 @@ pub async fn transcode_video(
         .unwrap()
 }
 
-/// 清理旧转码缓存，总大小超 5GB 时删除最旧文件
+/// 清理旧转码缓存，总大小超 5GB 时删除最旧文件（同时只运行一个）
 async fn cleanup_old_cache() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static RUNNING: AtomicBool = AtomicBool::new(false);
+    if RUNNING.swap(true, Ordering::AcqRel) { return; }
+
     let dir = transcode_cache_dir();
     let mut entries: Vec<_> = match tokio::fs::read_dir(&dir).await {
         Ok(mut rd) => {
@@ -221,6 +243,7 @@ async fn cleanup_old_cache() {
         let _ = tokio::fs::remove_file(&p).await;
         to_free = to_free.saturating_sub(s);
     }
+    RUNNING.store(false, Ordering::Release);
 }
 
 /// HLS 分片兼容

@@ -117,39 +117,36 @@ fn main() {
             tauri::async_runtime::spawn(async move {
                 use lan_media_hub_core::{FolderWatcher, IndexScanner};
                 let debounce_dur = std::time::Duration::from_secs(5);
-                loop {
-                    let shares: Vec<(uuid::Uuid, std::path::PathBuf)> = {
-                        let app = s.read().await;
-                        let manager = app.shared_folders.read().await;
-                        manager.get_all_shares().iter().map(|s| (s.config.id, s.config.path.clone())).collect()
-                    };
-                    for (share_id, path) in shares {
-                        let s3 = s.clone();
-                        tauri::async_runtime::spawn(async move {
-                            let mut w = match FolderWatcher::new(&path) {
-                                Ok(w) => w,
-                                Err(_) => return,
-                            };
+                let shares: Vec<(uuid::Uuid, std::path::PathBuf)> = {
+                    let app = s.read().await;
+                    let manager = app.shared_folders.read().await;
+                    manager.get_all_shares().iter().map(|s| (s.config.id, s.config.path.clone())).collect()
+                };
+                for (share_id, path) in shares {
+                    let s3 = s.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let mut w = match FolderWatcher::new(&path) {
+                            Ok(w) => w,
+                            Err(_) => return,
+                        };
+                        loop {
+                            if w.next_event().await.is_none() { break; }
+                            let deadline = tokio::time::Instant::now() + debounce_dur;
                             loop {
-                                if w.next_event().await.is_none() { break; }
-                                let deadline = tokio::time::Instant::now() + debounce_dur;
-                                loop {
-                                    match tokio::time::timeout_at(deadline, w.next_event()).await {
-                                        Ok(Some(_)) => continue,
-                                        _ => break,
-                                    }
-                                }
-                                tracing::info!("File change in share {}, rescanning...", share_id);
-                                let app = s3.read().await;
-                                if let Some(db) = &app.db {
-                                    let mut index = app.media_index.write().await;
-                                    let scanner = IndexScanner::new();
-                                    let _ = scanner.scan_share(share_id, &path, &mut index, db).await;
+                                match tokio::time::timeout_at(deadline, w.next_event()).await {
+                                    Ok(Some(_)) => continue,
+                                    _ => break,
                                 }
                             }
-                        });
-                    }
-                    tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+                            tracing::info!("File change in share {}, rescanning...", share_id);
+                            let app = s3.read().await;
+                            if let Some(db) = &app.db {
+                                let mut index = app.media_index.write().await;
+                                let scanner = IndexScanner::new();
+                                let _ = scanner.scan_share(share_id, &path, &mut index, db).await;
+                            }
+                        }
+                    });
                 }
             });
         }
