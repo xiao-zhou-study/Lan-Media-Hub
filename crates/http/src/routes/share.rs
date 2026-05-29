@@ -226,15 +226,17 @@ fn classify(p: &PathBuf) -> &'static str {
 }
 
 fn mime_type(p: &PathBuf) -> &'static str {
-    match p.extension().and_then(|e|e.to_str()).map(|e|e.to_lowercase()).as_deref() {
-        Some("mp4")|Some("m4v")=>"video/mp4", Some("mkv")=>"video/x-matroska", Some("webm")=>"video/webm",
-        Some("avi")|Some("divx")=>"video/x-msvideo", Some("mov")=>"video/quicktime",
-        Some("mpg")|Some("mpeg")=>"video/mpeg", Some("wmv")|Some("asf")=>"video/x-ms-wmv",
-        Some("flv")=>"video/x-flv", Some("ogv")|Some("ogg")=>"video/ogg",
-        Some("mp3")=>"audio/mpeg", Some("flac")=>"audio/flac", Some("wav")=>"audio/wav",
-        Some("aac")=>"audio/aac", Some("m4a")=>"audio/mp4",
-        Some("jpg")|Some("jpeg")=>"image/jpeg", Some("png")=>"image/png",
-        Some("gif")=>"image/gif", Some("webp")=>"image/webp",
+    let ext = p.extension().and_then(|e|e.to_str()).map(|e|e.to_lowercase()).unwrap_or_default();
+    let real_ext = if ext == "bc!" { p.with_extension("").extension().and_then(|e|e.to_str()).map(|e|e.to_lowercase()).unwrap_or_default() } else { ext };
+    match real_ext.as_str() {
+        "mp4"|"m4v"=>"video/mp4", "mkv"=>"video/x-matroska", "webm"=>"video/webm",
+        "avi"|"divx"=>"video/x-msvideo", "mov"=>"video/quicktime",
+        "mpg"|"mpeg"=>"video/mpeg", "wmv"|"asf"=>"video/x-ms-wmv",
+        "flv"=>"video/x-flv", "ogv"|"ogg"=>"video/ogg",
+        "mp3"=>"audio/mpeg", "flac"=>"audio/flac", "wav"=>"audio/wav",
+        "aac"=>"audio/aac", "m4a"=>"audio/mp4",
+        "jpg"|"jpeg"=>"image/jpeg", "png"=>"image/png",
+        "gif"=>"image/gif", "webp"=>"image/webp",
         _=>"application/octet-stream",
     }
 }
