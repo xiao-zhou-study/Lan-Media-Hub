@@ -19,6 +19,8 @@ const previewUrl = ref('')
 const previewType = ref('')
 const previewName = ref('')
 const showPreview = ref(false)
+const isVideoLoading = ref(false)
+const videoError = ref('')
 const speedHint = ref('')
 const videoRef = ref<HTMLVideoElement>()
 
@@ -79,9 +81,16 @@ async function handleClick(f: any) {
     previewUrl.value = withToken(`/api/${needTranscode ? "transcode" : "stream"}/${props.shareId}/${f.path}`)
   }
   showPreview.value = true
+  if (f.media_type !== 'image') {
+    isVideoLoading.value = true
+    videoError.value = ''
+  }
 }
 
-function closePreview() { showPreview.value = false; previewUrl.value = ""; stopLongPress() }
+function closePreview() { showPreview.value = false; previewUrl.value = ''; isVideoLoading.value = false; videoError.value = ''; stopLongPress() }
+
+function onVideoLoaded() { isVideoLoading.value = false; videoError.value = '' }
+function onVideoError() { isVideoLoading.value = false; videoError.value = '播放失败，请检查文件是否完整或格式是否支持' }
 
 // === 长按倍速 / 滑动进度条 ===
 let longPressTimer: any = null
@@ -288,9 +297,21 @@ const filteredFiles = computed(() => {
       <!-- Transcode loading -->
 
       <div class="absolute inset-0 flex items-center justify-center">
+        <!-- 视频加载中 -->
+        <div v-if="isVideoLoading && (previewType === 'video' || previewType === 'audio')" class="flex flex-col items-center gap-3 text-white/70">
+          <div class="w-10 h-10 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+          <span class="text-sm">{{ previewName }}</span>
+        </div>
+        <!-- 视频错误 -->
+        <div v-if="videoError" class="flex flex-col items-center gap-2 text-white/70 px-8 text-center">
+          <div class="text-3xl">😞</div>
+          <span class="text-sm">{{ videoError }}</span>
+          <button @click="closePreview" class="mt-2 px-4 py-1.5 bg-white/20 rounded-full text-xs">关闭</button>
+        </div>
         <video v-if="previewType === 'video' || previewType === 'audio'"
           ref="videoRef" :src="previewUrl"
-          class="w-full h-full object-contain" playsinline controls autoplay />
+          class="w-full h-full object-contain" playsinline controls autoplay
+          @loadeddata="onVideoLoaded" @error="onVideoError" />
         <img v-else-if="previewType === 'image'" :src="previewUrl" class="w-full h-full object-contain" />
       </div>
     </div>

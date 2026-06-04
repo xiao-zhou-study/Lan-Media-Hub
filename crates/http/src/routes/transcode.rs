@@ -74,13 +74,16 @@ pub async fn transcode_video(
     if !clean.starts_with(&share.config.path) { return (StatusCode::FORBIDDEN,"Out of bounds").into_response() }
     if !clean.exists() || !clean.is_file() { return (StatusCode::NOT_FOUND,"Not found").into_response() }
 
-    // 先算缓存 key（只基于路径，不做 ffprobe），命中则直接返回
+    let start = params.get("start").and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
+
+    // 缓存 key：只有 start=0 才缓存（seek 请求不缓存，避免缓存混用）
     let path_hash = format!("{:x}", md5::compute(clean.to_string_lossy().as_bytes()));
-    // 尝试三种可能的缓存 key（未知编码策略时先试几个）
-    for profile in &["remux", "qsv", "sw"] {
-        let probe_path = transcode_cache_dir().join(format!("{}_{}", path_hash, profile));
-        if probe_path.exists() {
-            return super::share::serve_cached_file(&probe_path, &headers).await;
+    if (start - 0.0).abs() < 0.01 {
+        for profile in &["remux", "qsv", "sw"] {
+            let probe_path = transcode_cache_dir().join(format!("{}_{}", path_hash, profile));
+            if probe_path.exists() {
+                return super::share::serve_cached_file(&probe_path, &headers).await;
+            }
         }
     }
 
@@ -93,15 +96,10 @@ pub async fn transcode_video(
     let cache_key = format!("{}_{}", path_hash, profile);
     let cache_path = transcode_cache_dir().join(&cache_key);
 
-    // 缓存命中 → 直接走文件流
-    if cache_path.exists() {
-        return super::share::serve_cached_file(&cache_path, &headers).await;
-    }
-
-    let start = params.get("start").and_then(|s| s.parse::<f64>().ok()).unwrap_or(0.0);
-
-    // 写临时文件，成功后 rename 到缓存路径（避免损坏文件被服务）
-    let tmp_path = cache_path.with_extension("tmp.mp4");
+    // 写临时文件，成功后 rename 到缓存路径（避免损坏文件被服务）；seek 请求不缓存
+    let can_cache = (start - 0.0).abs() < 0.01;
+    let output_path = if can_cache { cache_path.clone() } else { transcode_cache_dir().join(format!("{}_{}_seek_{:.0}.tmp", path_hash, profile, start)) };
+    let tmp_path = output_path.with_extension("tmp.mp4");
 
     let mut cmd = tokio::process::Command::new(ffmpeg_path());
 
@@ -188,8 +186,8 @@ pub async fn transcode_video(
             }
             Err(_) => {}
         }
-        // FFmpeg 成功后 rename，失败则清理 tmp
-        if child.wait().await.map(|s| s.success()).unwrap_or(false) {
+        // FFmpeg 成功后 rename 到正式缓存，失败则清理 tmp；seek 请求不缓存
+        if can_cache && child.wait().await.map(|s| s.success()).unwrap_or(false) {
             let _ = tokio::fs::rename(&cache, &final_path).await;
         } else {
             let _ = tokio::fs::remove_file(&cache).await;
