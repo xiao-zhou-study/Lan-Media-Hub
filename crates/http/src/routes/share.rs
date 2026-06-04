@@ -7,6 +7,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::collections::HashMap;
+use crate::ffmpeg;
 use crate::server::AppState;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -311,7 +312,7 @@ pub async fn playback_start(
 
     // 需要转码：检查编码决定 remux 还是 transcode
     if media_type == "video" || media_type == "audio" {
-        let codec = probe_video_codec_inline(&clean).await;
+        let codec = ffmpeg::probe_video_codec(&clean).await;
         let method = if codec == "h264" { "remux" } else { "transcode" };
         return Json(PlaybackResponse {
             method: method.into(),
@@ -320,23 +321,4 @@ pub async fn playback_start(
     }
 
     Json(PlaybackResponse { method: "direct".into(), url: format!("/api/stream/{}/{}", id, body.path) }).into_response()
-}
-
-async fn probe_video_codec_inline(path: &PathBuf) -> String {
-    let ffprobe = {
-        let ffmpeg = ffmpeg_sidecar::paths::ffmpeg_path();
-        ffmpeg.with_file_name(if cfg!(windows) { "ffprobe.exe" } else { "ffprobe" })
-            .to_string_lossy().to_string()
-    };
-    match tokio::process::Command::new(&ffprobe)
-        .arg("-v").arg("error")
-        .arg("-select_streams").arg("v:0")
-        .arg("-show_entries").arg("stream=codec_name")
-        .arg("-of").arg("csv=p=0")
-        .arg(path.to_string_lossy().to_string())
-        .output().await
-    {
-        Ok(o) => String::from_utf8(o.stdout).unwrap_or_default().trim().to_string(),
-        Err(_) => String::new(),
-    }
 }

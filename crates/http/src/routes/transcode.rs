@@ -9,50 +9,25 @@ use std::path::PathBuf;
 use std::collections::HashMap;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio_stream::wrappers::ReceiverStream;
+use crate::ffmpeg;
 use crate::server::AppState;
 use super::share::parse_rest;
-
-fn ffmpeg_path() -> String {
-    ffmpeg_sidecar::paths::ffmpeg_path().to_string_lossy().to_string()
-}
-
-fn ffprobe_path() -> String {
-    let ffmpeg = ffmpeg_sidecar::paths::ffmpeg_path();
-    ffmpeg.with_file_name(if cfg!(windows) { "ffprobe.exe" } else { "ffprobe" })
-        .to_string_lossy().to_string()
-}
 
 fn transcode_cache_dir() -> PathBuf {
     let dir = if let Ok(a) = std::env::var("LOCALAPPDATA") { PathBuf::from(a).join("LanMediaHub").join("transcode") } else { PathBuf::from("transcode") };
     let _ = std::fs::create_dir_all(&dir); dir
 }
 
-/// 检测 Intel QSV 硬件加速是否可用（一次检测，缓存结果）
 fn qsv_available() -> bool {
     use std::sync::OnceLock;
     static QSV: OnceLock<bool> = OnceLock::new();
     *QSV.get_or_init(|| {
-        std::process::Command::new(ffmpeg_path())
+        std::process::Command::new(ffmpeg::ffmpeg_path())
             .args(["-hide_banner", "-encoders"])
             .output()
             .map(|o| String::from_utf8_lossy(&o.stdout).contains("h264_qsv"))
             .unwrap_or(false)
     })
-}
-
-/// ffprobe 检测源视频编码
-async fn probe_video_codec(path: &PathBuf) -> String {
-    match tokio::process::Command::new(ffprobe_path())
-        .arg("-v").arg("error")
-        .arg("-select_streams").arg("v:0")
-        .arg("-show_entries").arg("stream=codec_name")
-        .arg("-of").arg("csv=p=0")
-        .arg(path.to_string_lossy().to_string())
-        .output().await
-    {
-        Ok(o) => String::from_utf8(o.stdout).unwrap_or_default().trim().to_string(),
-        Err(_) => String::new(),
-    }
 }
 
 /// 流式转码 + 磁盘缓存
@@ -87,10 +62,13 @@ pub async fn transcode_video(
         }
     }
 
-    let codec = probe_video_codec(&clean).await;
+    let codec = ffmpeg::probe_video_codec(&clean).await;
     let can_remux = codec == "h264";
     let is_bc = clean.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase() == "bc!";
     let use_qsv = !can_remux && qsv_available() && !is_bc;
+
+    let crf = params.get("crf").and_then(|s| s.parse::<u8>().ok()).unwrap_or(23);
+    let audio_bitrate = params.get("abitrate").and_then(|s| s.parse::<u32>().ok()).unwrap_or(128);
 
     let profile = if can_remux { "remux" } else if use_qsv { "qsv" } else { "sw" };
     let cache_key = format!("{}_{}", path_hash, profile);
@@ -101,7 +79,7 @@ pub async fn transcode_video(
     let output_path = if can_cache { cache_path.clone() } else { transcode_cache_dir().join(format!("{}_{}_seek_{:.0}.tmp", path_hash, profile, start)) };
     let tmp_path = output_path.with_extension("tmp.mp4");
 
-    let mut cmd = tokio::process::Command::new(ffmpeg_path());
+    let mut cmd = tokio::process::Command::new(ffmpeg::ffmpeg_path());
 
     // QSV 硬件加速：解码也走 GPU，零拷贝到编码器
     if use_qsv {
@@ -123,12 +101,12 @@ pub async fn transcode_video(
     } else {
         cmd.arg("-c:v").arg("libx264")
            .arg("-preset").arg("ultrafast")
-           .arg("-crf").arg("23")
+           .arg("-crf").arg(crf.to_string())
            .arg("-vf").arg("scale=trunc(iw/2)*2:trunc(ih/2)*2");
     }
 
     cmd.arg("-c:a").arg("aac")
-       .arg("-b:a").arg("128k")
+       .arg("-b:a").arg(format!("{}k", audio_bitrate))
        .arg("-movflags").arg("frag_keyframe+empty_moov")
        .arg("-f").arg("mp4")
        .arg(tmp_path.to_string_lossy().to_string())

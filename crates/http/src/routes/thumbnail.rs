@@ -5,16 +5,13 @@ use axum::{
 };
 use axum::body::Body;
 use std::path::PathBuf;
+use crate::ffmpeg;
 use crate::server::AppState;
 use super::share::parse_rest;
 
 #[derive(serde::Deserialize)]
 pub struct ThumbParams { #[serde(default = "default_size")] size: u32 }
 fn default_size() -> u32 { 480 }
-
-fn ffmpeg_path() -> String {
-    ffmpeg_sidecar::paths::ffmpeg_path().to_string_lossy().to_string()
-}
 
 pub async fn get_thumbnail(
     _auth: crate::auth::Auth,
@@ -48,7 +45,7 @@ pub async fn get_thumbnail(
 
         let output = cache_dir.join(format!("{}.tmp.jpg", cache_key));
         let is_bc = ext == "bc!";
-        let result = tokio::process::Command::new(ffmpeg_path())
+        let result = tokio::process::Command::new(ffmpeg::ffmpeg_path())
             .arg("-y")
             .arg("-ss").arg(if is_bc { "0" } else { "3" })
             .arg("-i").arg(clean.to_string_lossy().to_string())
@@ -73,7 +70,7 @@ pub async fn get_thumbnail(
                 // .bc! 重试：去掉 scale 滤镜，原尺寸输出
                 if is_bc {
                     let output2 = cache_dir.join(format!("{}.tmp2.jpg", cache_key));
-                    let r2 = tokio::process::Command::new(ffmpeg_path())
+                    let r2 = tokio::process::Command::new(ffmpeg::ffmpeg_path())
                         .arg("-y").arg("-ss").arg("0").arg("-i").arg(clean.to_string_lossy().to_string())
                         .arg("-vframes").arg("1").arg("-q:v").arg("2")
                         .arg("-f").arg("image2").arg(output2.to_string_lossy().to_string())
