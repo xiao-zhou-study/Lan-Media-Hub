@@ -46,12 +46,16 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-
 .empty{text-align:center;padding:40px 14px;color:var(--sub);font-size:12px}
 .empty-icon{font-size:36px;margin-bottom:6px}
 .loading{text-align:center;padding:40px;color:var(--sub)}.spinner{width:24px;height:24px;border:2px solid #e0e0e0;border-top-color:var(--blue);border-radius:50%;animation:spin .7s linear infinite;margin:0 auto 10px}@keyframes spin{to{transform:rotate(360deg)}}
-.vp-overlay{position:fixed;inset:0;background:#000;z-index:100;display:none;flex-direction:column}
-.vp-overlay.show{display:flex}
-.vp-header{display:flex;align-items:center;justify-content:space-between;padding:8px 12px;color:#fff;font-size:13px;background:rgba(0,0,0,.5)}
-.vp-close{background:none;border:none;color:#fff;font-size:22px;cursor:pointer;padding:4px 8px}
-.vp-video{flex:1;display:flex;align-items:center;justify-content:center}
-.vp-video video{max-width:100%;max-height:100%}
+.vp-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:#000;z-index:1000;display:none}
+.vp-overlay.show{display:block}
+.vp-controls{position:absolute;top:0;left:0;right:0;z-index:110;display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:linear-gradient(to bottom,rgba(0,0,0,.7),transparent)}
+.vp-close{background:rgba(0,0,0,.5);border:none;color:#fff;font-size:20px;cursor:pointer;padding:8px 12px;border-radius:20px}
+.vp-fullscreen{background:rgba(0,0,0,.5);border:none;color:#fff;font-size:14px;cursor:pointer;padding:8px 12px;border-radius:20px}
+.vp-loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px}
+.vp-error{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;font-size:14px;gap:10px}
+.vp-error button{background:rgba(255,255,255,.2);border:none;color:#fff;padding:8px 16px;border-radius:20px;cursor:pointer}
+.vp-video{position:absolute;inset:0}
+.vp-video video{width:100%;height:100%;object-fit:contain}
 .img-overlay{position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:100;display:none;align-items:center;justify-content:center;flex-direction:column}
 .img-overlay.show{display:flex}
 .img-overlay img{max-width:95%;max-height:80%;object-fit:contain}
@@ -95,8 +99,20 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-
   <div id="list"><div class="loading"><div class="spinner"></div>加载中...</div></div>
 </div>
 <div class="vp-overlay" id="vp">
-  <div class="vp-header"><span id="vpt">播放</span><button class="vp-close" onclick="cv()">✕</button></div>
-  <div class="vp-video"><video id="vv" controls playsinline></video></div>
+  <div class="vp-controls">
+    <button class="vp-close" onclick="cv()">✕ 关闭</button>
+    <button class="vp-fullscreen" onclick="toggleFullscreen()">⛶ 全屏</button>
+  </div>
+  <div class="vp-loading" id="vl" style="display:none">
+    <div class="spinner"></div>
+    <span style="margin-left:10px">加载中...</span>
+  </div>
+  <div class="vp-error" id="ve" style="display:none">
+    <span>😞 播放失败</span>
+    <span style="font-size:12px;opacity:.7">请检查文件是否完整或格式是否支持</span>
+    <button onclick="cv()">关闭</button>
+  </div>
+  <div class="vp-video"><video id="vv" controls playsinline preload="metadata"></video></div>
 </div>
 <div class="img-overlay" id="io">
   <button class="img-close" onclick="ci()">✕</button>
@@ -111,7 +127,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC',sans-
 <div class="toast" id="toast"></div>
 <script>
 function $(id){return document.getElementById(id)}
-function api(u,o){o=o||{};var sep=u.indexOf('?')>=0?'&':'?';return fetch(u+sep+'pw='+encodeURIComponent(pw),o).then(function(r){if(!r.ok)throw new Error(r.status);return r.json()})}
+function api(u,o){o=o||{};var headers=o.headers||{};if(token)headers['Authorization']='Bearer '+token;o.headers=headers;return fetch(u,o).then(function(r){if(!r.ok)throw new Error(r.status);return r.json()})}
 function toast(m){var t=$('toast');t.textContent=m;t.classList.add('show');setTimeout(function(){t.classList.remove('show')},2000)}
 function fs(b){if(!b)return'-';if(b<1024)return b+' B';if(b<1048576)return(b/1024).toFixed(1)+' KB';if(b<1073741824)return(b/1048576).toFixed(1)+' MB';return(b/1073741824).toFixed(1)+' GB'}
 function ic(t){var m={video:'🎬',audio:'🎵',image:'🖼️',file:'📄',directory:'📁'};return m[t]||'📄'}
@@ -165,8 +181,8 @@ function ds(){var q=$('si').value.toLowerCase();entries=q?allEntries.filter(func
 function of(id,p,n,z,t){
   var segs=p.split('/').map(function(s){return encodeURIComponent(s)}).join('/');
   var ext=(n.split('.').pop()||'').toLowerCase();
-  // 浏览器不支持直接播放的格式用转码
-  var native=['mp4','webm','ogg','mp3','wav','aac','m4a'];
+  // 浏览器支持直接播放的格式
+  var native=['mp4','webm','ogg','mp3','wav','aac','m4a','mkv','mov','flac','m4v'];
   var useTc=native.indexOf(ext)===-1;
   var u='/api/'+(useTc?'transcode':'stream')+'/'+encodeURIComponent(id)+'/'+segs;
   if(t==='video'||t==='audio'){pv(u,n);return}
@@ -177,8 +193,38 @@ function si(id,p,n,z,t){
   $('mt').textContent=n;$('mb').innerHTML='<div class="info-row"><span class="label">类型</span><span>'+t+'</span></div><div class="info-row"><span class="label">大小</span><span>'+fs(z)+'</span></div><div class="info-row"><span class="label">路径</span><span style="font-size:10px;word-break:break-all">'+p+'</span></div>';
   $('mo').classList.add('show');
 }
-function pv(u,n){$('vpt').textContent=n;var v=$('vv');v.src=u;$('vp').classList.add('show');v.play().catch(function(){})}
-function cv(){var v=$('vv');v.pause();v.src='';$('vp').classList.remove('show')}
+function pv(u,n){
+  var v=$('vv');
+  v.src=u;
+  // 隐藏页面其他内容，只显示播放器
+  document.querySelector('.header').style.display='none';
+  document.querySelector('.main').style.display='none';
+  $('vp').classList.add('show');
+  $('vl').style.display='flex';
+  $('ve').style.display='none';
+  v.play().catch(function(){});
+  v.onloadeddata=function(){ $('vl').style.display='none'; };
+  v.onerror=function(){ $('vl').style.display='none'; $('ve').style.display='flex'; };
+}
+function cv(){
+  var v=$('vv');
+  v.pause();
+  v.src='';
+  v.onloadeddata=null;
+  v.onerror=null;
+  $('vp').classList.remove('show');
+  $('vl').style.display='none';
+  $('ve').style.display='none';
+  // 恢复显示页面内容
+  document.querySelector('.header').style.display='';
+  document.querySelector('.main').style.display='';
+}
+function toggleFullscreen(){
+  var v=$('vv');
+  if(v.requestFullscreen){ v.requestFullscreen(); }
+  else if(v.webkitRequestFullscreen){ v.webkitRequestFullscreen(); }
+  else if(v.msRequestFullscreen){ v.msRequestFullscreen(); }
+}
 function si2(u){ciu=u;$('ip').src=u;$('io').classList.add('show')}
 function ci(){$('io').classList.remove('show');setTimeout(function(){$('ip').src=''},200)}
 
@@ -197,15 +243,15 @@ function ls(){
     $('itemCount').textContent=s.length+' 个共享';
   }).catch(function(){$('list').innerHTML='<div class="empty"><div class="empty-icon">⚠️</div><p>连接失败</p></div>'})
 }
-// 密码检查
-var pw=localStorage.getItem('lmpw')||'';
+// Token 认证
+var token=localStorage.getItem('lmtoken')||'';
 function initApp(){
-  // 先检查是否需要密码
-  fetch('/api/auth?pw='+encodeURIComponent(pw)).then(function(r){
-    if(r.ok){ls();return}
-    // 需要密码
-    showPwPrompt();
-  }).catch(function(){ls()}); // 网络错误直接尝试加载
+  if(!token){showPwPrompt();return}
+  // 验证 token 是否有效
+  fetch('/api/shares',{headers:{'Authorization':'Bearer '+token}}).then(function(r){
+    if(r.ok){ls()}
+    else{showPwPrompt()}
+  }).catch(function(){showPwPrompt()});
 }
 function showPwPrompt(){
   var l=$('list');
@@ -221,11 +267,23 @@ function showPwPrompt(){
 }
 function checkPw(){
   var inp=$('pwInput');if(!inp)return;
-  pw=inp.value;
-  fetch('/api/auth?pw='+encodeURIComponent(pw)).then(function(r){
-    if(r.ok){localStorage.setItem('lmpw',pw);ls()}
-    else{var e=$('pwError');if(e)e.style.display='block';inp.value=''}
-  }).catch(function(){ls()});
+  var pw=inp.value;
+  fetch('/api/login',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({password:pw})
+  }).then(function(r){return r.json()}).then(function(data){
+    if(data.token){
+      token=data.token;
+      localStorage.setItem('lmtoken',token);
+      ls();
+    }else{
+      var e=$('pwError');if(e)e.style.display='block';
+      inp.value='';
+    }
+  }).catch(function(){
+    var e=$('pwError');if(e)e.style.display='block';
+  });
 }
 un();initApp();
 </script>

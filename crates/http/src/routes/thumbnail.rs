@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use crate::ffmpeg;
 use crate::server::AppState;
 use super::share::parse_rest;
+use lan_media_hub_core::{resolve_real_extension, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS};
 
 #[derive(serde::Deserialize)]
 pub struct ThumbParams { #[serde(default = "default_size")] size: u32 }
@@ -32,12 +33,12 @@ pub async fn get_thumbnail(
 
     let ext = clean.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
     // .bc! 后缀 → 看前面的扩展名
-    let real_ext = if ext == "bc!" { clean.with_extension("").extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).unwrap_or_default() } else { ext.clone() };
-    if matches!(real_ext.as_str(), "jpg" | "jpeg" | "png" | "gif" | "webp" | "bmp") {
-        return serve_file(&clean, &format!("image/{}", if ext == "jpg" { "jpeg" } else { &ext })).await;
+    let real_ext = resolve_real_extension(&clean);
+    if IMAGE_EXTENSIONS.contains(&real_ext.as_str()) {
+        return serve_file(&clean, &format!("image/{}", if real_ext == "jpg" { "jpeg" } else { &real_ext })).await;
     }
 
-    if matches!(real_ext.as_str(), "mp4" | "mkv" | "avi" | "mov" | "webm" | "wmv" | "flv" | "mpg" | "mpeg" | "ts" | "mts" | "m2ts" | "vob" | "rm" | "rmvb" | "3gp" | "asf" | "divx" | "ogv" | "m4v") {
+    if VIDEO_EXTENSIONS.contains(&real_ext.as_str()) {
         let cache_key = format!("{:x}_{}", md5::compute(clean.to_string_lossy().as_bytes()), params.size);
         let cache_dir = get_thumb_cache_dir();
         let cache_path = cache_dir.join(format!("{}.jpg", cache_key));

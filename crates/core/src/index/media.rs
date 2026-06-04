@@ -234,3 +234,105 @@ pub struct IndexStats {
     pub audio_count: usize,
     pub image_count: usize,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    fn create_test_item(name: &str, share_id: Uuid) -> MediaItem {
+        let ext = name.rsplit('.').next().unwrap_or("").to_string();
+        let media_type = crate::MediaType::from_extension(&ext);
+        MediaItem {
+            id: Uuid::new_v4(),
+            share_id,
+            name: name.to_string(),
+            relative_path: PathBuf::from(name),
+            full_path: PathBuf::from(format!("/test/{}", name)),
+            size: 1000,
+            media_type,
+            extension: ext,
+            modified_at: Utc::now(),
+            indexed_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn test_add_and_get() {
+        let mut index = MediaIndex::new();
+        let share_id = Uuid::new_v4();
+        let item = create_test_item("test.mp4", share_id);
+
+        index.add_item(item);
+
+        assert_eq!(index.get_all_items().len(), 1);
+        assert!(index.find_by_path(&PathBuf::from("/test/test.mp4")).is_some());
+        assert_eq!(index.get_items_by_share(share_id).len(), 1);
+    }
+
+    #[test]
+    fn test_remove_item() {
+        let mut index = MediaIndex::new();
+        let share_id = Uuid::new_v4();
+        let item = create_test_item("test.mp4", share_id);
+        let id = item.id;
+
+        index.add_item(item);
+        assert_eq!(index.get_all_items().len(), 1);
+
+        let removed = index.remove_item(id);
+        assert!(removed.is_some());
+        assert_eq!(index.get_all_items().len(), 0);
+    }
+
+    #[test]
+    fn test_remove_by_path() {
+        let mut index = MediaIndex::new();
+        let share_id = Uuid::new_v4();
+        let item = create_test_item("test.mp4", share_id);
+        let path = item.full_path.clone();
+
+        index.add_item(item);
+        assert!(index.find_by_path(&path).is_some());
+
+        index.remove_by_path(&path);
+        assert!(index.find_by_path(&path).is_none());
+    }
+
+    #[test]
+    fn test_search() {
+        let mut index = MediaIndex::new();
+        let share_id = Uuid::new_v4();
+
+        index.add_item(create_test_item("vacation.mp4", share_id));
+        index.add_item(create_test_item("movie.mkv", share_id));
+        index.add_item(create_test_item("music.mp3", share_id));
+
+        let results = index.search("vacation");
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "vacation.mp4");
+
+        let results = index.search("mp4");
+        assert_eq!(results.len(), 1);
+
+        let results = index.search("nonexistent");
+        assert_eq!(results.len(), 0);
+    }
+
+    #[test]
+    fn test_stats() {
+        let mut index = MediaIndex::new();
+        let share_id = Uuid::new_v4();
+
+        index.add_item(create_test_item("video1.mp4", share_id));
+        index.add_item(create_test_item("video2.mkv", share_id));
+        index.add_item(create_test_item("audio.mp3", share_id));
+
+        let stats = index.stats();
+        assert_eq!(stats.total_count, 3);
+        assert_eq!(stats.total_size, 3000);
+        assert_eq!(stats.video_count, 2);
+        assert_eq!(stats.audio_count, 1);
+        assert_eq!(stats.image_count, 0);
+    }
+}

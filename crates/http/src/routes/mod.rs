@@ -10,9 +10,11 @@ use axum::Router;
 use axum::response::{Response, Html, IntoResponse};
 use axum::body::Body;
 use axum::routing::get;
+use axum::http::header;
 use tower_http::cors::{CorsLayer, Any};
 use tower_http::trace::TraceLayer;
 use tower_http::services::ServeDir;
+use tower_http::set_header::SetResponseHeaderLayer;
 use crate::server::AppState;
 use std::path::PathBuf;
 
@@ -25,8 +27,22 @@ pub fn create_router() -> Router<AppState> {
         .nest("/api", api::create_api_router())
         .nest_service("/assets", ServeDir::new(web_dir.join("assets")))
         .route("/", get(move || serve_index(web_dir1)))
+        .route("/mobile", get(web_ui::serve_web_ui))
         .fallback(get(move || serve_index(web_dir2)))
-        .layer(CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any))
+        // 安全响应头
+        .layer(SetResponseHeaderLayer::overriding(
+            header::X_CONTENT_TYPE_OPTIONS,
+            header::HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            header::X_FRAME_OPTIONS,
+            header::HeaderValue::from_static("DENY"),
+        ))
+        // CORS 配置
+        .layer(CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::OPTIONS])
+            .allow_headers(Any))
         .layer(TraceLayer::new_for_http())
 }
 

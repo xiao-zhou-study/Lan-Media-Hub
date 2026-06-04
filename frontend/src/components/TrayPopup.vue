@@ -20,6 +20,7 @@ const showAddDialog = ref(false)
 const newSharePath = ref('')
 const newShareName = ref('')
 const askingToDelete = ref('')
+const portInput = ref('')
 const qrCanvas = ref<HTMLCanvasElement>()
 let invoke: any = null
 let openDialog: any = null
@@ -30,6 +31,7 @@ onMounted(async () => {
   await shareStore.loadShares()
   try { const info = await invoke('get_server_info'); hostname.value = info.hostname; serverUrl.value = info.url; hasPassword.value = info.has_password; serverRunning.value = info.server_running; if (serverUrl.value) setTimeout(genQr,200) } catch {}
   try { const pw = await invoke("get_password"); if (pw) { passwordInput.value = pw; hasPassword.value = true } } catch {}
+  try { const settings = await invoke('get_settings'); portInput.value = settings.port.toString() } catch {}
 })
 
 function genQr() { var cv=qrCanvas.value; if(!cv||!serverUrl.value) return; QRCode.toCanvas(cv, serverUrl.value, { width: 128, margin: 2 }, function(err) { if(err) console.error(err) }) }
@@ -44,6 +46,12 @@ async function doAdd() { if (!newSharePath.value || !invoke) return; try { await
 async function doDelete() { if (!askingToDelete.value || !invoke) return; try { await invoke('remove_share', { id: askingToDelete.value }); await shareStore.loadShares(); askingToDelete.value = ''; showToast('已删除') } catch { showToast('删除失败', 'error') } }
 async function openUrl() { try { var m = await import('@tauri-apps/plugin-opener'); await m.openUrl(serverUrl.value) } catch { window.open(serverUrl.value, '_blank') } }
 async function savePassword() { if (!invoke) return; try { await invoke('set_password', { password: passwordInput.value }); hasPassword.value = !!passwordInput.value; showToast('密码已保存') } catch { showToast('保存失败', 'error') } }
+async function savePort() {
+  if (!invoke) return;
+  var port = parseInt(portInput.value);
+  if (isNaN(port) || port < 1024 || port > 65535) { showToast('端口范围：1024-65535', 'error'); return }
+  try { await invoke('update_settings', { port: port }); showToast('端口已修改，重启后生效') } catch { showToast('保存失败', 'error') }
+}
 function fmtSize(b: number) { if (b < 1024) return b + ' B'; if (b < 1048576) return (b / 1024).toFixed(1) + ' KB'; if (b < 1073741824) return (b / 1048576).toFixed(1) + ' MB'; return (b / 1073741824).toFixed(1) + ' GB' }
 const stats = computed(function() { return { count: shareStore.shares.length, files: shareStore.shares.reduce(function(a: number, s: any) { return a + s.file_count }, 0), size: shareStore.shares.reduce(function(a: number, s: any) { return a + s.total_size }, 0) } })
 
@@ -81,7 +89,12 @@ import QRCode from "qrcode";
       <input :type="showPassword?'text':'password'" v-model="passwordInput" placeholder="访问密码" class="w-24 px-2 py-1 bg-slate-50 border rounded text-xs" />
       <button @click="showPassword=!showPassword" class="text-slate-400 text-xs">{{ showPassword?'隐藏':'显示' }}</button>
       <button @click="savePassword" class="px-2 py-1 bg-blue-500 text-white text-xs rounded hover:bg-blue-600">保存</button>
-      
+    </div>
+    <!-- 端口设置 -->
+    <div class="ml-auto flex items-center gap-2">
+      <label class="text-xs text-slate-400">端口：</label>
+      <input v-model="portInput" type="number" min="1024" max="65535" placeholder="8241" class="w-20 px-2 py-1 bg-slate-50 border rounded text-xs" />
+      <button @click="savePort" class="px-2 py-1 bg-green-500 text-white text-xs rounded hover:bg-green-600">应用</button>
     </div>
   </div>
 

@@ -108,7 +108,7 @@ All file access: `path_clean::PathClean::clean()` → `starts_with()` check agai
 ### Settings Persistence
 
 - `settings.json` in `%LOCALAPPDATA%/LanMediaHub/` — password, port (loaded on startup, saved on change)
-- `lan_media_hub.db` in same directory — shares, media index, kv_store
+- `lan_media_hub_v2.db` in same directory — shares, media index, kv_store
 - JWT secret regenerated on startup (not persisted — sessions expire after restart)
 
 ## Key Conventions

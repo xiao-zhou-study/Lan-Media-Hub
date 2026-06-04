@@ -3,7 +3,7 @@ use tauri::State;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use serde::{Deserialize, Serialize};
-use lan_media_hub_core::IndexScanner;
+use lan_media_hub_core::{IndexScanner, classify_extension, resolve_real_extension, VIDEO_EXTENSIONS};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ShareResponse {
@@ -85,7 +85,7 @@ pub async fn add_share(
     tauri::async_runtime::spawn(async move {
         let ffmpeg = ffmpeg_sidecar::paths::ffmpeg_path();
         let cache_dir = get_thumb_cache_dir();
-        let video_exts = ["mp4","mkv","avi","mov","webm","wmv","flv","mpg","mpeg","ts","mts","m2ts","vob","rm","rmvb","3gp","asf","divx","ogv","m4v"];
+        let video_exts = VIDEO_EXTENSIONS;
         for entry in walkdir::WalkDir::new(&scan_path).into_iter().filter_map(|e| e.ok()).filter(|e| e.file_type().is_file()) {
             let ext = entry.path().extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
             if !video_exts.contains(&ext.as_str()) { continue; }
@@ -312,12 +312,8 @@ pub async fn browse_folder(
 }
 
 fn classify(p: &std::path::Path) -> String {
-    match p.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()).as_deref() {
-        Some("mp4") | Some("mkv") | Some("avi") | Some("mov") | Some("webm") | Some("wmv") | Some("flv") => "video".into(),
-        Some("mp3") | Some("flac") | Some("wav") | Some("aac") | Some("ogg") | Some("m4a") | Some("wma") => "audio".into(),
-        Some("jpg") | Some("jpeg") | Some("png") | Some("gif") | Some("bmp") | Some("webp") | Some("tiff") => "image".into(),
-        _ => "file".into(),
-    }
+    let ext = resolve_real_extension(p);
+    classify_extension(&ext).to_string()
 }
 
 /// 生成 QR 码（PNG base64）

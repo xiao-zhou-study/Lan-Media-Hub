@@ -66,12 +66,19 @@ where AppState: FromRef<S>, S: Send + Sync
 }
 
 pub fn create_token(secret: &str) -> Result<String, jsonwebtoken::errors::Error> {
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as usize;
-    encode(&Header::default(), &Claims { sub: "lan-media-hub".into(), iat: now, exp: now + 86400 }, &EncodingKey::from_secret(secret.as_bytes()))
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as usize;
+    // 4 小时过期
+    encode(&Header::default(), &Claims { sub: "lan-media-hub".into(), iat: now, exp: now + 4 * 3600 }, &EncodingKey::from_secret(secret.as_bytes()))
 }
 
 pub fn generate_secret() -> String {
     use sha2::{Sha256, Digest};
-    let seed = format!("{}:{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos(), uuid::Uuid::new_v4());
+    let seed = format!("{}:{}", std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos(), uuid::Uuid::new_v4());
     format!("{:x}", Sha256::digest(seed.as_bytes()))
 }

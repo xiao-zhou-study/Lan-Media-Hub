@@ -1,6 +1,7 @@
 use crate::index::{MediaItem, MediaIndex};
 use crate::share::SharedFolderManager;
 use crate::db::Database;
+use crate::{VIDEO_EXTENSIONS, AUDIO_EXTENSIONS, IMAGE_EXTENSIONS};
 use anyhow::{Context, Result};
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -14,19 +15,15 @@ pub struct IndexScanner {
 
 impl IndexScanner {
     pub fn new() -> Self {
-        let extensions = [
-            // Video
-            "mp4", "mkv", "avi", "mov", "wmv", "flv", "webm",
-            // Audio
-            "mp3", "flac", "wav", "aac", "ogg", "m4a", "wma",
-            // Image
-            "jpg", "jpeg", "png", "gif", "bmp", "webp", "tiff",
-        ];
+        let mut extensions: Vec<&str> = Vec::new();
+        extensions.extend_from_slice(VIDEO_EXTENSIONS);
+        extensions.extend_from_slice(AUDIO_EXTENSIONS);
+        extensions.extend_from_slice(IMAGE_EXTENSIONS);
 
         Self {
             supported_extensions: extensions
                 .iter()
-                .map(|s| s.to_lowercase())
+                .map(|s| s.to_string())
                 .collect(),
         }
     }

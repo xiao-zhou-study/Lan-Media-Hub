@@ -7,8 +7,15 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::collections::HashMap;
+use serde_json::json;
 use crate::ffmpeg;
 use crate::server::AppState;
+use lan_media_hub_core::{classify_extension, mime_for_extension, resolve_real_extension};
+
+/// 统一错误响应
+fn error_response(status: StatusCode, message: &str) -> Response {
+    (status, Json(json!({"error": message}))).into_response()
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ShareInfoResponse {
@@ -51,7 +58,7 @@ pub async fn get_share_info(_auth: crate::auth::Auth, Path(id): Path<String>, St
             path: s.config.path.to_string_lossy().to_string(),
             file_count: s.file_count, total_size: s.total_size, status: status_str(s.status),
         })).into_response(),
-        None => (StatusCode::NOT_FOUND, Json(serde_json::json!({"error":"Not found"}))).into_response(),
+        None => error_response(StatusCode::NOT_FOUND, "Not found"),
     }
 }
 
@@ -63,12 +70,12 @@ pub async fn browse_share(
 ) -> Response {
     let (id, path) = parse_rest(&rest);
     let manager = state.manager.read().await;
-    let uuid = match uuid::Uuid::parse_str(&id) { Ok(u)=>u, Err(_)=>return (StatusCode::BAD_REQUEST,"Invalid ID").into_response() };
-    let share = match manager.get_share(uuid) { Some(s)=>s, None=>return (StatusCode::NOT_FOUND,"Not found").into_response() };
+    let uuid = match uuid::Uuid::parse_str(&id) { Ok(u)=>u, Err(_)=>return error_response(StatusCode::BAD_REQUEST, "Invalid ID") };
+    let share = match manager.get_share(uuid) { Some(s)=>s, None=>return error_response(StatusCode::NOT_FOUND, "Not found") };
     let full_path = if path.is_empty() { share.config.path.clone() } else { share.config.path.join(&path) };
     let clean: PathBuf = path_clean::PathClean::clean(&full_path);
-    if !clean.starts_with(&share.config.path) { return (StatusCode::FORBIDDEN,"Out of bounds").into_response() }
-    if !clean.exists() { return (StatusCode::NOT_FOUND,"Not found").into_response() }
+    if !clean.starts_with(&share.config.path) { return error_response(StatusCode::FORBIDDEN, "Out of bounds") }
+    if !clean.exists() { return error_response(StatusCode::NOT_FOUND, "Not found") }
 
     if clean.is_file() {
         return (StatusCode::OK, Json(FileInfoResponse {
@@ -108,12 +115,12 @@ pub async fn stream_video(
 ) -> Response {
     let (id, file_path) = parse_rest(&rest);
     let manager = state.manager.read().await;
-    let uuid = match uuid::Uuid::parse_str(&id) { Ok(u)=>u, Err(_)=>return (StatusCode::BAD_REQUEST,"Bad ID").into_response() };
-    let share = match manager.get_share(uuid) { Some(s)=>s, None=>return (StatusCode::NOT_FOUND,"Not found").into_response() };
+    let uuid = match uuid::Uuid::parse_str(&id) { Ok(u)=>u, Err(_)=>return error_response(StatusCode::BAD_REQUEST, "Bad ID") };
+    let share = match manager.get_share(uuid) { Some(s)=>s, None=>return error_response(StatusCode::NOT_FOUND, "Not found") };
     let full_path = if file_path.is_empty() { share.config.path.clone() } else { share.config.path.join(&file_path) };
     let clean: PathBuf = path_clean::PathClean::clean(&full_path);
-    if !clean.starts_with(&share.config.path) { return (StatusCode::FORBIDDEN,"Out of bounds").into_response() }
-    if !clean.exists() || !clean.is_file() { return (StatusCode::NOT_FOUND,"Not found").into_response() }
+    if !clean.starts_with(&share.config.path) { return error_response(StatusCode::FORBIDDEN, "Out of bounds") }
+    if !clean.exists() || !clean.is_file() { return error_response(StatusCode::NOT_FOUND, "Not found") }
     stream_file(clean, &headers).await
 }
 
@@ -129,8 +136,8 @@ async fn stream_file(path: PathBuf, headers: &axum::http::HeaderMap) -> Response
     use axum::body::Body;
     use tokio_util::io::ReaderStream;
 
-    let mut file = match File::open(&path).await { Ok(f)=>f, Err(_)=>return (StatusCode::INTERNAL_SERVER_ERROR,"Open failed").into_response() };
-    let file_size = match file.metadata().await { Ok(m)=>m.len(), Err(_)=>return (StatusCode::INTERNAL_SERVER_ERROR,"Metadata failed").into_response() };
+    let mut file = match File::open(&path).await { Ok(f)=>f, Err(_)=>return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Open failed") };
+    let file_size = match file.metadata().await { Ok(m)=>m.len(), Err(_)=>return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Metadata failed") };
     let mime = mime_type(&path);
 
     // Range 请求处理
@@ -142,7 +149,7 @@ async fn stream_file(path: PathBuf, headers: &axum::http::HeaderMap) -> Response
             // 大 Range 也流式传输，避免内存爆炸
             if length > 4 * 1024 * 1024 {
                 // >4MB: 分块流式发送
-                if file.seek(std::io::SeekFrom::Start(start)).await.is_err() { return (StatusCode::INTERNAL_SERVER_ERROR,"Seek failed").into_response() }
+                if file.seek(std::io::SeekFrom::Start(start)).await.is_err() { return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Seek failed") }
                 let take = tokio::io::AsyncReadExt::take(file, length);
                 let stream = ReaderStream::with_capacity(take, 256 * 1024);
                 Response::builder().status(StatusCode::PARTIAL_CONTENT)
@@ -150,18 +157,18 @@ async fn stream_file(path: PathBuf, headers: &axum::http::HeaderMap) -> Response
                     .header(header::CONTENT_RANGE, format!("bytes {}-{}/{}", start, end, file_size))
                     .header(header::CONTENT_LENGTH, length)
                     .header(header::ACCEPT_RANGES, "bytes")
-                    .header(header::CACHE_CONTROL, "public, max-age=3600")
+                    .header(header::CACHE_CONTROL, "public, max-age=86400")
                     .body(Body::from_stream(stream)).unwrap()
             } else {
-                if file.seek(std::io::SeekFrom::Start(start)).await.is_err() { return (StatusCode::INTERNAL_SERVER_ERROR,"Seek failed").into_response() }
+                if file.seek(std::io::SeekFrom::Start(start)).await.is_err() { return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Seek failed") }
                 let mut buf = vec![0u8; length as usize];
-                if file.read_exact(&mut buf).await.is_err() { return (StatusCode::INTERNAL_SERVER_ERROR,"Read failed").into_response() }
+                if file.read_exact(&mut buf).await.is_err() { return error_response(StatusCode::INTERNAL_SERVER_ERROR, "Read failed") }
                 Response::builder().status(StatusCode::PARTIAL_CONTENT)
                     .header(header::CONTENT_TYPE, mime)
                     .header(header::CONTENT_RANGE, format!("bytes {}-{}/{}", start, end, file_size))
                     .header(header::CONTENT_LENGTH, length)
                     .header(header::ACCEPT_RANGES, "bytes")
-                    .header(header::CACHE_CONTROL, "public, max-age=3600")
+                    .header(header::CACHE_CONTROL, "public, max-age=86400")
                     .body(Body::from(buf)).unwrap()
             }
         }
@@ -171,7 +178,7 @@ async fn stream_file(path: PathBuf, headers: &axum::http::HeaderMap) -> Response
                 .header(header::CONTENT_TYPE, mime)
                 .header(header::CONTENT_LENGTH, file_size)
                 .header(header::ACCEPT_RANGES, "bytes")
-                .header(header::CACHE_CONTROL, "public, max-age=3600")
+                .header(header::CACHE_CONTROL, "public, max-age=86400")
                 .body(Body::from_stream(stream)).unwrap()
         }
     }
@@ -179,67 +186,79 @@ async fn stream_file(path: PathBuf, headers: &axum::http::HeaderMap) -> Response
 
 fn parse_range(s: &str, file_size: u64) -> Option<(u64, u64)> {
     let s = s.strip_prefix("bytes=")?;
+    // 多范围请求（包含逗号）不支持，返回 None 以回退到完整响应
+    if s.contains(',') {
+        return None;
+    }
     let (start_s, end_s) = s.split_once('-')?;
     let start: u64 = start_s.parse().ok()?;
-    if end_s.is_empty() { if start < file_size { Some((start, file_size - 1)) } else { None } }
-    else { let end: u64 = end_s.parse().ok()?; if start <= end && end < file_size { Some((start, end)) } else { None } }
+    if end_s.is_empty() {
+        if start < file_size { Some((start, file_size - 1)) } else { None }
+    } else {
+        let end: u64 = end_s.parse().ok()?;
+        if start <= end && end < file_size { Some((start, end)) } else { None }
+    }
 }
 
 pub async fn upload_file(
     _auth: crate::auth::Auth,
-    State(state): State<AppState>, Path(rest): Path<String>,
+    State(state): State<AppState>,
+    Path(rest): Path<String>,
     mut multipart: axum::extract::Multipart,
 ) -> Response {
     let (id, target_path) = parse_rest(&rest);
     let manager = state.manager.read().await;
-    let uuid = match uuid::Uuid::parse_str(&id) { Ok(u)=>u, Err(_)=>return (StatusCode::BAD_REQUEST,"Bad ID").into_response() };
-    let share = match manager.get_share(uuid) { Some(s)=>s, None=>return (StatusCode::NOT_FOUND,"Not found").into_response() };
+    let uuid = match uuid::Uuid::parse_str(&id) { Ok(u)=>u, Err(_)=>return error_response(StatusCode::BAD_REQUEST, "Bad ID") };
+    let share = match manager.get_share(uuid) { Some(s)=>s, None=>return error_response(StatusCode::NOT_FOUND, "Not found") };
+
+    let mut uploaded = Vec::new();
+    let mut errors = Vec::new();
 
     while let Ok(Some(field)) = multipart.next_field().await {
         let name = field.file_name().unwrap_or("unknown").to_string();
-        let data = match field.bytes().await { Ok(d)=>d, Err(_)=>continue };
-        let dest = if target_path.is_empty() { share.config.path.join(&name) } else { share.config.path.join(&target_path).join(&name) };
+        let data = match field.bytes().await {
+            Ok(d) => d,
+            Err(e) => {
+                errors.push(format!("{}: {}", name, e));
+                continue;
+            }
+        };
+
+        let dest = if target_path.is_empty() {
+            share.config.path.join(&name)
+        } else {
+            share.config.path.join(&target_path).join(&name)
+        };
+
         let clean: PathBuf = path_clean::PathClean::clean(&dest);
-        if !clean.starts_with(&share.config.path) { return (StatusCode::FORBIDDEN,"Out of bounds").into_response() }
-        if tokio::fs::write(&clean, &data).await.is_err() { return (StatusCode::INTERNAL_SERVER_ERROR,"Write error").into_response() }
-        return (StatusCode::OK, clean.to_string_lossy().to_string()).into_response();
+        if !clean.starts_with(&share.config.path) {
+            return error_response(StatusCode::FORBIDDEN, "Out of bounds");
+        }
+
+        match tokio::fs::write(&clean, &data).await {
+            Ok(_) => uploaded.push(name),
+            Err(e) => errors.push(format!("{}: {}", name, e)),
+        }
     }
-    (StatusCode::BAD_REQUEST, "No file").into_response()
+
+    if uploaded.is_empty() && errors.is_empty() {
+        return error_response(StatusCode::BAD_REQUEST, "No file");
+    }
+
+    (StatusCode::OK, Json(json!({
+        "uploaded": uploaded,
+        "errors": errors
+    }))).into_response()
 }
 
 fn classify(p: &PathBuf) -> &'static str {
-    // 完整文件名（处理 .mp4.bc! 这种 BitComet 未完成下载）
-    let _full_name = p.file_name().and_then(|n|n.to_str()).unwrap_or("").to_lowercase();
-    let ext = p.extension().and_then(|e|e.to_str()).map(|e|e.to_lowercase()).unwrap_or_default();
-    // 扩展名是 bc! 时，看前面的扩展名
-    let real_ext = if ext == "bc!" {
-        p.with_extension("").extension().and_then(|e|e.to_str()).map(|e|e.to_lowercase()).unwrap_or_default()
-    } else { ext };
-
-    match real_ext.as_str() {
-        "mp4"|"mkv"|"avi"|"mov"|"webm"|"wmv"|"flv"
-        |"mpg"|"mpeg"|"ts"|"mts"|"m2ts"|"vob"
-        |"rm"|"rmvb"|"3gp"|"asf"|"divx"|"ogv"|"m4v"=>"video",
-        "mp3"|"flac"|"wav"|"aac"|"ogg"|"m4a"=>"audio",
-        "jpg"|"jpeg"|"png"|"gif"|"bmp"|"webp"=>"image",
-        _=>"file",
-    }
+    let ext = resolve_real_extension(p);
+    classify_extension(&ext)
 }
 
 fn mime_type(p: &PathBuf) -> &'static str {
-    let ext = p.extension().and_then(|e|e.to_str()).map(|e|e.to_lowercase()).unwrap_or_default();
-    let real_ext = if ext == "bc!" { p.with_extension("").extension().and_then(|e|e.to_str()).map(|e|e.to_lowercase()).unwrap_or_default() } else { ext };
-    match real_ext.as_str() {
-        "mp4"|"m4v"=>"video/mp4", "mkv"=>"video/x-matroska", "webm"=>"video/webm",
-        "avi"|"divx"=>"video/x-msvideo", "mov"=>"video/quicktime",
-        "mpg"|"mpeg"=>"video/mpeg", "wmv"|"asf"=>"video/x-ms-wmv",
-        "flv"=>"video/x-flv", "ogv"|"ogg"=>"video/ogg",
-        "mp3"=>"audio/mpeg", "flac"=>"audio/flac", "wav"=>"audio/wav",
-        "aac"=>"audio/aac", "m4a"=>"audio/mp4",
-        "jpg"|"jpeg"=>"image/jpeg", "png"=>"image/png",
-        "gif"=>"image/gif", "webp"=>"image/webp",
-        _=>"application/octet-stream",
-    }
+    let ext = resolve_real_extension(p);
+    mime_for_extension(&ext)
 }
 
 fn file_modified(p: &PathBuf) -> String {
@@ -286,11 +305,11 @@ pub async fn playback_start(
 ) -> Response {
     let (id, file_path) = parse_rest(&rest);
     let manager = state.manager.read().await;
-    let uuid = match uuid::Uuid::parse_str(&id) { Ok(u)=>u, Err(_)=>return (StatusCode::BAD_REQUEST,"Bad ID").into_response() };
-    let share = match manager.get_share(uuid) { Some(s)=>s, None=>return (StatusCode::NOT_FOUND,"Not found").into_response() };
+    let uuid = match uuid::Uuid::parse_str(&id) { Ok(u)=>u, Err(_)=>return error_response(StatusCode::BAD_REQUEST, "Bad ID") };
+    let share = match manager.get_share(uuid) { Some(s)=>s, None=>return error_response(StatusCode::NOT_FOUND, "Not found") };
     let full_path = if file_path.is_empty() { share.config.path.join(&body.path) } else { share.config.path.join(&file_path) };
     let clean: PathBuf = path_clean::PathClean::clean(&full_path);
-    if !clean.starts_with(&share.config.path) { return (StatusCode::FORBIDDEN,"Out of bounds").into_response() }
+    if !clean.starts_with(&share.config.path) { return error_response(StatusCode::FORBIDDEN, "Out of bounds") }
 
     let media_type = classify(&clean);
     if media_type == "image" {
@@ -321,4 +340,51 @@ pub async fn playback_start(
     }
 
     Json(PlaybackResponse { method: "direct".into(), url: format!("/api/stream/{}/{}", id, body.path) }).into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_range_normal() {
+        assert_eq!(parse_range("bytes=0-99", 1000), Some((0, 99)));
+        assert_eq!(parse_range("bytes=100-199", 1000), Some((100, 199)));
+    }
+
+    #[test]
+    fn test_parse_range_open_ended() {
+        assert_eq!(parse_range("bytes=500-", 1000), Some((500, 999)));
+        assert_eq!(parse_range("bytes=0-", 1000), Some((0, 999)));
+    }
+
+    #[test]
+    fn test_parse_range_full_file() {
+        assert_eq!(parse_range("bytes=0-999", 1000), Some((0, 999)));
+    }
+
+    #[test]
+    fn test_parse_range_out_of_bounds() {
+        assert_eq!(parse_range("bytes=0-9999", 1000), None);
+        assert_eq!(parse_range("bytes=1000-1000", 1000), None);
+    }
+
+    #[test]
+    fn test_parse_range_invalid_format() {
+        assert_eq!(parse_range("", 1000), None);
+        assert_eq!(parse_range("bytes=", 1000), None);
+        assert_eq!(parse_range("bytes=-", 1000), None);
+        assert_eq!(parse_range("bytes=abc-def", 1000), None);
+    }
+
+    #[test]
+    fn test_parse_range_multi_range() {
+        // 多范围请求应返回 None
+        assert_eq!(parse_range("bytes=0-100, 200-300", 1000), None);
+    }
+
+    #[test]
+    fn test_parse_range_no_prefix() {
+        assert_eq!(parse_range("0-99", 1000), None);
+    }
 }

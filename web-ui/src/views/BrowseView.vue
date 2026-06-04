@@ -103,6 +103,14 @@ function closePreview() { showPreview.value = false; previewUrl.value = ''; isVi
 function onVideoLoaded() { isVideoLoading.value = false; videoError.value = '' }
 function onVideoError() { isVideoLoading.value = false; videoError.value = '播放失败，请检查文件是否完整或格式是否支持' }
 
+function toggleFullscreen() {
+  const v = videoRef.value
+  if (!v) return
+  if (v.requestFullscreen) { v.requestFullscreen() }
+  else if ((v as any).webkitRequestFullscreen) { (v as any).webkitRequestFullscreen() }
+  else if ((v as any).msRequestFullscreen) { (v as any).msRequestFullscreen() }
+}
+
 
 let _pullStartY = 0, _pulling = false
 function onContentTouchStart(e: TouchEvent) {
@@ -322,37 +330,47 @@ const filteredFiles = computed(() => {
     <!-- Preview -->
     <div v-if="showPreview" class="fixed inset-0 bg-black z-50 flex flex-col"
       @touchstart.passive="onTouchStart" @touchmove.prevent="onTouchMove" @touchend="onTouchEnd">
-      <!-- Close button -->
-      <button @click="closePreview" class="absolute top-3 right-3 z-20 w-9 h-9 rounded-full bg-white/20 hover:bg-white/30 text-white flex items-center justify-center text-lg backdrop-blur-sm">✕</button>
-      <!-- Transcode loading -->
+      <!-- Controls -->
+      <div class="absolute top-0 left-0 right-0 z-20 flex justify-between items-center p-3 bg-gradient-to-b from-black/70 to-transparent">
+        <button @click="closePreview" class="px-3 py-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white text-sm backdrop-blur-sm">✕ 关闭</button>
+        <button @click="toggleFullscreen" class="px-3 py-1.5 rounded-full bg-white/20 hover:bg-white/30 text-white text-sm backdrop-blur-sm">⛶ 全屏</button>
+      </div>
 
-      <div class="absolute inset-0 flex items-center justify-center">
-        <!-- 加载中 -->
-        <div v-if="isVideoLoading" class="flex flex-col items-center gap-3 text-white/70">
+      <!-- 加载中 -->
+      <div v-if="isVideoLoading" class="absolute inset-0 flex items-center justify-center">
+        <div class="flex flex-col items-center gap-3 text-white/70">
           <div class="w-10 h-10 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
-          <span class="text-sm">{{ previewName }}</span>
+          <span class="text-sm">加载中...</span>
         </div>
-        <!-- 错误 -->
-        <div v-if="videoError" class="flex flex-col items-center gap-2 text-white/70 px-8 text-center">
+      </div>
+
+      <!-- 错误 -->
+      <div v-else-if="videoError" class="absolute inset-0 flex items-center justify-center">
+        <div class="flex flex-col items-center gap-2 text-white/70 px-8 text-center">
           <div class="text-3xl">😞</div>
           <span class="text-sm">{{ videoError }}</span>
           <button @click="closePreview" class="mt-2 px-4 py-1.5 bg-white/20 rounded-full text-xs">关闭</button>
         </div>
-        <!-- 视频 -->
-        <video v-if="previewType === 'video'"
-          ref="videoRef" :src="previewUrl"
-          class="w-full h-full object-contain" playsinline controls autoplay
-          @loadeddata="onVideoLoaded" @error="onVideoError" />
-        <!-- 音频：紧凑卡片播放器 -->
-        <div v-else-if="previewType === 'audio'" class="bg-white/10 backdrop-blur-md rounded-2xl w-72 p-6 flex flex-col items-center gap-4">
+      </div>
+
+      <!-- 视频 -->
+      <video v-else-if="previewType === 'video'"
+        ref="videoRef" :src="previewUrl"
+        class="w-full h-full object-contain" playsinline controls autoplay preload="metadata"
+        @loadeddata="onVideoLoaded" @error="onVideoError" />
+
+      <!-- 音频：紧凑卡片播放器 -->
+      <div v-else-if="previewType === 'audio'" class="absolute inset-0 flex items-center justify-center">
+        <div class="bg-white/10 backdrop-blur-md rounded-2xl w-72 p-6 flex flex-col items-center gap-4">
           <div class="w-20 h-20 rounded-xl bg-white/20 flex items-center justify-center text-4xl">🎵</div>
           <div class="text-white text-sm font-medium text-center truncate w-full">{{ previewName }}</div>
           <audio ref="videoRef" :src="previewUrl" controls autoplay class="w-full"
             @loadeddata="onVideoLoaded" @error="onVideoError" />
         </div>
-        <!-- 图片 -->
-        <img v-else-if="previewType === 'image'" :src="previewUrl" class="w-full h-full object-contain" />
       </div>
+
+      <!-- 图片 -->
+      <img v-else-if="previewType === 'image'" :src="previewUrl" class="w-full h-full object-contain" />
     </div>
   </div>
 </template>
