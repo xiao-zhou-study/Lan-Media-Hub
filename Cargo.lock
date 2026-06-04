@@ -2358,10 +2358,12 @@ name = "lan-media-hub"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ffmpeg-sidecar",
  "hostname",
  "lan-media-hub-config",
  "lan-media-hub-core",
  "lan-media-hub-http",
+ "md5",
  "path-clean",
  "qrcode",
  "serde",
@@ -2376,6 +2378,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "walkdir",
 ]
 
 [[package]]

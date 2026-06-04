@@ -283,8 +283,8 @@ const filteredFiles = computed(() => {
         <div v-for="f in filteredFiles" :key="f.path" @click="handleClick(f)" class="group active:scale-95 transition-transform duration-100">
           <div class="bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100 hover:shadow-md transition-shadow cursor-pointer">
             <!-- Thumbnail / Icon -->
-            <div v-if="thumbUrl(f)" class="aspect-square bg-gray-100 flex items-center justify-center overflow-hidden">
-              <img :src="thumbUrl(f)" loading="lazy" class="w-full h-full object-cover" @error="($event.target as HTMLImageElement).style.display='none'" />
+            <div v-if="thumbUrl(f)" class="aspect-square bg-gray-200 animate-pulse flex items-center justify-center overflow-hidden">
+              <img :src="thumbUrl(f)" loading="lazy" class="w-full h-full object-cover opacity-0 transition-opacity duration-300" onload="this.style.opacity='1';this.parentElement.classList.remove('animate-pulse')" @error="($event.target as HTMLImageElement).style.display='none'" />
             </div>
             <div v-else class="aspect-square flex items-center justify-center text-3xl" :class="{
               'bg-orange-50': f.is_dir,
@@ -305,8 +305,8 @@ const filteredFiles = computed(() => {
       <!-- List -->
       <div v-else class="space-y-0.5">
         <div v-for="f in filteredFiles" :key="f.path" @click="handleClick(f)" class="bg-white rounded-xl px-3 py-2.5 flex items-center gap-3 active:bg-gray-50 cursor-pointer text-sm border border-gray-50 shadow-sm">
-          <div class="w-10 h-10 rounded-lg flex items-center justify-center shrink-0 overflow-hidden bg-gray-100">
-            <img v-if="thumbUrl(f)" :src="thumbUrl(f)" loading="lazy" class="w-full h-full object-cover" @error="($event.target as HTMLImageElement).style.display='none'" />
+          <div class="w-10 h-10 rounded-lg flex items-center justify-center shrink-0 overflow-hidden bg-gray-200 animate-pulse">
+            <img v-if="thumbUrl(f)" :src="thumbUrl(f)" loading="lazy" class="w-full h-full object-cover opacity-0 transition-opacity duration-300" onload="this.style.opacity='1';this.parentElement.classList.remove('animate-pulse')" @error="($event.target as HTMLImageElement).style.display='none'" />
             <span v-else class="text-lg">{{ f.is_dir ? '📁' : '📄' }}</span>
           </div>
           <div class="flex-1 min-w-0">

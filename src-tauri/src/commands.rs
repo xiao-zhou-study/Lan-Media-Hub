@@ -78,7 +78,28 @@ pub async fn add_share(
     }
 
     // 4. 为新共享启用文件监控
-    super::watcher::spawn_watcher_for_share(state.inner().clone(), id, path_buf);
+    super::watcher::spawn_watcher_for_share(state.inner().clone(), id, path_buf.clone());
+
+    // 5. 后台预生成缩略图
+    let scan_path = path_buf.clone();
+    tauri::async_runtime::spawn(async move {
+        let ffmpeg = ffmpeg_sidecar::paths::ffmpeg_path();
+        let cache_dir = get_thumb_cache_dir();
+        let video_exts = ["mp4","mkv","avi","mov","webm","wmv","flv","mpg","mpeg","ts","mts","m2ts","vob","rm","rmvb","3gp","asf","divx","ogv","m4v"];
+        for entry in walkdir::WalkDir::new(&scan_path).into_iter().filter_map(|e| e.ok()).filter(|e| e.file_type().is_file()) {
+            let ext = entry.path().extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+            if !video_exts.contains(&ext.as_str()) { continue; }
+            let cache_key = format!("{:x}_200", md5::compute(entry.path().to_string_lossy().as_bytes()));
+            let cache_path = cache_dir.join(format!("{}.jpg", cache_key));
+            if cache_path.exists() { continue; }
+            let _ = tokio::process::Command::new(&ffmpeg)
+                .arg("-y").arg("-ss").arg("3").arg("-i").arg(entry.path().to_string_lossy().to_string())
+                .arg("-vframes").arg("1").arg("-vf").arg("scale=200:-1").arg("-q:v").arg("3")
+                .arg("-f").arg("image2").arg(cache_path.to_string_lossy().to_string())
+                .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
+                .status().await;
+        }
+    });
 
     tracing::info!("Share {} scanned: {} files, {} bytes", id, file_count, total_size);
     Ok(id.to_string())
@@ -342,4 +363,9 @@ pub async fn get_server_info(
         "server_running": *running,
         "has_password": !settings.password.is_empty(),
     }))
+}
+
+fn get_thumb_cache_dir() -> std::path::PathBuf {
+    let dir = if let Ok(a) = std::env::var("LOCALAPPDATA") { std::path::PathBuf::from(a).join("LanMediaHub").join("thumbnails") } else { std::path::PathBuf::from("thumbnails") };
+    let _ = std::fs::create_dir_all(&dir); dir
 }
