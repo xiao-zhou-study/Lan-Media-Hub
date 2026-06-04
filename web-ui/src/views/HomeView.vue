@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 
 const router = useRouter()
@@ -8,6 +8,13 @@ const loading = ref(true)
 const api = (window as any).$api
 
 onMounted(async () => { try { shares.value = await api('/api/shares') } catch {}; loading.value = false })
+
+const stats = computed(() => {
+  let files = 0, size = 0
+  for (const s of shares.value) { files += s.file_count || 0; size += s.total_size || 0 }
+  return { files, size }
+})
+
 function fmtSize(b: number) { if (!b) return '-'; if (b < 1024) return b + ' B'; if (b < 1048576) return (b / 1024).toFixed(1) + ' KB'; if (b < 1073741824) return (b / 1048576).toFixed(1) + ' MB'; return (b / 1073741824).toFixed(1) + ' GB' }
 </script>
 
@@ -18,6 +25,25 @@ function fmtSize(b: number) { if (!b) return '-'; if (b < 1024) return b + ' B';
         📡 Lan Media Hub
         <span class="text-[10px] font-normal text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">共享列表</span>
       </h1>
+    </div>
+    <!-- 统计卡片 -->
+    <div v-if="!loading && shares.length" class="px-3 pt-3">
+      <div class="bg-white rounded-2xl border border-gray-100 p-3 flex gap-4 shadow-sm">
+        <div class="flex-1 text-center">
+          <div class="text-lg font-bold text-gray-800">{{ shares.length }}</div>
+          <div class="text-[10px] text-gray-400">共享</div>
+        </div>
+        <div class="w-px bg-gray-100" />
+        <div class="flex-1 text-center">
+          <div class="text-lg font-bold text-gray-800">{{ stats.files.toLocaleString() }}</div>
+          <div class="text-[10px] text-gray-400">文件</div>
+        </div>
+        <div class="w-px bg-gray-100" />
+        <div class="flex-1 text-center">
+          <div class="text-lg font-bold text-gray-800">{{ fmtSize(stats.size) }}</div>
+          <div class="text-[10px] text-gray-400">总大小</div>
+        </div>
+      </div>
     </div>
     <div class="p-3">
       <div v-if="loading" class="flex justify-center py-20 text-gray-400 text-xs gap-2">

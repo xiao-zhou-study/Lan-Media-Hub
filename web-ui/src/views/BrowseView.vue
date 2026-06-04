@@ -24,6 +24,9 @@ const videoError = ref('')
 const speedHint = ref('')
 const videoRef = ref<HTMLMediaElement>()
 
+// 下拉刷新
+const pullOffset = ref(0)
+
 const displayPath = computed(() => {
   const p = (route.params.path as any) || []
   const arr = Array.isArray(p) ? p : (typeof p === 'string' ? p.split('/') : [])
@@ -34,12 +37,19 @@ const breadcrumbs = computed(() => {
   return parts.map((name, i) => ({ name, path: parts.slice(0, i + 1).join('/') }))
 })
 
-async function loadFiles() {
+const fileCache = new Map<string, any[]>()
+async function loadFiles(force = false) {
+  const key = props.shareId + ':' + displayPath.value
+  if (!force && fileCache.has(key)) {
+    files.value = fileCache.get(key)!
+    loading.value = false
+    return
+  }
   loading.value = true
   try {
     const sub = displayPath.value
     const data = await api(`/api/browse/${props.shareId}${sub ? '/' + sub : ''}?sort=${sortBy.value}&order=${sortOrder.value}`)
-    if (data.entries) files.value = data.entries
+    if (data.entries) { files.value = data.entries; fileCache.set(key, data.entries) }
     else if (data.name) files.value = []
   } catch { files.value = [] }
   loading.value = false
@@ -51,13 +61,14 @@ onMounted(async () => {
 })
 
 // watch with flush:post 确保 route 已更新
-watch(() => [route.params.shareId, route.params.path], () => loadFiles(), { flush: 'post' })
+watch(() => [route.params.shareId, route.params.path], () => loadFiles(false), { flush: 'post' })
 
 watch(viewMode, (v) => { localStorage.setItem('lm_view', v) })
 watch([sortBy, sortOrder], () => {
   localStorage.setItem('lm_sort', sortBy.value)
   localStorage.setItem('lm_order', sortOrder.value)
-  loadFiles()
+  fileCache.clear()
+  loadFiles(true)
 })
 
 function navTo(subPath: string) { router.push({ name: 'browse', params: { shareId: props.shareId, path: subPath || '' } }) }
@@ -92,6 +103,21 @@ function closePreview() { showPreview.value = false; previewUrl.value = ''; isVi
 function onVideoLoaded() { isVideoLoading.value = false; videoError.value = '' }
 function onVideoError() { isVideoLoading.value = false; videoError.value = '播放失败，请检查文件是否完整或格式是否支持' }
 
+
+let _pullStartY = 0, _pulling = false
+function onContentTouchStart(e: TouchEvent) {
+  if (window.scrollY > 5 || files.value.length === 0) return
+  _pullStartY = e.touches[0].clientY; _pulling = true
+}
+function onContentTouchMove(e: TouchEvent) {
+  if (!_pulling) return
+  const dy = e.touches[0].clientY - _pullStartY
+  if (dy > 10) { e.preventDefault(); pullOffset.value = Math.min(dy * 0.5, 60) }
+  else { pullOffset.value = 0; _pulling = false }
+}
+function onContentTouchEnd() {
+  if (pullOffset.value > 40) loadFiles(true); pullOffset.value = 0; _pulling = false
+}
 // === 长按倍速 / 滑动进度条 ===
 let longPressTimer: any = null
 let longPressInterval: any = null
@@ -239,7 +265,11 @@ const filteredFiles = computed(() => {
     </div>
 
     <!-- Content -->
-    <div class="flex-1 p-2">
+    <div class="flex-1 p-2" @touchstart.passive="onContentTouchStart" @touchmove="onContentTouchMove" @touchend="onContentTouchEnd">
+      <!-- 下拉刷新指示器 -->
+      <div class="flex justify-center overflow-hidden transition-all duration-200" :style="{ height: pullOffset + 'px', opacity: pullOffset / 60 }">
+        <div class="text-xs text-gray-400 py-1" v-if="pullOffset > 20">{{ pullOffset > 40 ? '松开刷新' : '下拉刷新' }}</div>
+      </div>
       <div v-if="loading" class="flex items-center justify-center h-40 gap-2 text-gray-400 text-xs">
         <div class="w-4 h-4 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin"></div> 加载中
       </div>
