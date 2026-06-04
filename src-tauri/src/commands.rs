@@ -77,6 +77,9 @@ pub async fn add_share(
         manager.update_stats(id, file_count, total_size);
     }
 
+    // 4. 为新共享启用文件监控
+    super::watcher::spawn_watcher_for_share(state.inner().clone(), id, path_buf);
+
     tracing::info!("Share {} scanned: {} files, {} bytes", id, file_count, total_size);
     Ok(id.to_string())
 }
